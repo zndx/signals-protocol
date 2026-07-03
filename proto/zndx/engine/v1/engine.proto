@@ -1,0 +1,68 @@
+// zndx.engine.v1 — the SHARED engine service identity for the signals federation.
+//
+// WHY (measured 2026-07-03, the first live cross-engine call): the per-project engines
+// (aegir.engine.AegirEngine :50151, atelier.engine.AtelierEngine :50251, gaius :50051) mirror each
+// other's message SHAPES, but gRPC method paths embed package+service — so a foreign stub gets
+// UNIMPLEMENTED even against a wire-identical peer. Every signals engine registers THIS service
+// ADDITIONALLY, beside its native one: the native service stays the project-internal surface; this
+// is the federation face. One stub, any engine.
+//
+// Design rules:
+//   * additive-only within v1 — new fields get new numbers, nothing is renamed or renumbered;
+//   * capabilities, not models — `capability` names an ability ("instruct", "referee"); the serving
+//     engine chooses and reports the model;
+//   * reasoning retention — thinking traces are a corpus value-add and ride reasoning_content
+//     (or inline in text when the model/parser doesn't separate them), never silently dropped;
+//   * engine-private details (internal vLLM ports, log paths) do NOT cross this boundary.
+//
+// Patterned after the KServe Open Inference Protocol repository (spec + proto, versioned dirs);
+// OIP itself remains the horizon peer protocol for heterogeneous serving stacks — see README.
+
+syntax = "proto3";
+package zndx.engine.v1;
+
+service Engine {
+  // Request an inference CAPABILITY. The engine selects/ensures the model and serves internally;
+  // the caller never sees a model endpoint.
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+  // The federation-facing status surface: what capabilities this engine serves, on which GPUs.
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
+
+message CompleteRequest {
+  string capability = 1;      // names an ability, not a model
+  string prompt = 2;
+  string system_prompt = 3;
+  int32 max_tokens = 4;
+  float temperature = 5;
+  // Optional JSON Schema (as a JSON string) for engine-enforced structured output (e.g. vLLM
+  // guided-json). Empty = unconstrained. Present from v1's birth so federated calls keep schema
+  // enforcement across engines.
+  string json_schema = 6;
+}
+
+message CompleteResponse {
+  string text = 1;                // the answer; reasoning inline here when not separated
+  string model = 2;               // the model the engine actually served the capability with
+  int32 prompt_tokens = 3;
+  int32 completion_tokens = 4;
+  float latency_ms = 5;
+  string reasoning_content = 6;   // separated chain-of-thought when available; empty otherwise
+  string finish_reason = 7;       // "stop" (complete) vs "length" (truncated — raise max_tokens)
+}
+
+message StatusRequest {}
+
+message Endpoint {
+  string capability = 1;
+  string model = 2;
+  bool healthy = 3;
+  repeated int32 gpu_ids = 4;     // which local GPUs this capability pins (lease visibility)
+  string detail = 5;
+}
+
+message StatusResponse {
+  string project = 1;             // "aegir" | "atelier" | "gaius" — who answered
+  repeated Endpoint endpoints = 2;
+  int32 total_gpus = 3;
+}

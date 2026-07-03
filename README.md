@@ -1,1 +1,69 @@
 # signals-protocol
+
+The shared wire contracts of the **zndx signals federation** — the protocols by which the
+sibling projects' engines (Ægir, Atelier, Gaius) invoke each other's capabilities while
+remaining independently operable. Patterned after the
+[KServe Open Inference Protocol](https://github.com/kserve/open-inference-protocol)
+repository: versioned proto packages + a specification document per protocol, evolved
+additively, adopted by reference (each project vendors this repo as a submodule and
+generates bindings from `proto/`).
+
+## Why this exists
+
+Measured 2026-07-03, minutes after the first live cross-engine call: the per-project
+engines mirror each other's message *shapes*, but gRPC method paths embed
+package+service — `aegir.engine.AegirEngine` vs `atelier.engine.AtelierEngine` — so a
+foreign stub gets `UNIMPLEMENTED` against a wire-identical peer. "Identical wire
+contract" requires an identical service path, not just identical messages. Each engine
+therefore registers the shared `zndx.engine.v1.Engine` service **additionally**, beside
+its native service: the native service remains the project-internal surface; the shared
+service is the federation face. One stub, any engine.
+
+## Protocols
+
+| package | spec | status |
+|---|---|---|
+| `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — capability inference (`Complete`) + federation status (`Status`) |
+| `zndx.verify.v1` | — | RESERVED: verification artifacts on the wire (reasoner certificates, kvasir proof DAGs — the rase_types direction from Gaius) |
+
+## Adopters
+
+| project | native service | shared service | gRPC port |
+|---|---|---|---|
+| aegir | `aegir.engine.AegirEngine` | `zndx.engine.v1.Engine` (from next restart) | :50151 |
+| atelier | `atelier.engine.AtelierEngine` | planned | :50251 |
+| gaius | (see `gaius FEDERATION.md`) | planned | :50051 |
+
+GPU co-tenancy rides the shared advisory lease dir `/tmp/zndx-gpu-leases` (per-GPU-set
+lock files, project-tagged owners) plus each engine's authoritative nvidia-smi probe.
+
+## Evolution rules
+
+- **Additive-only within a version**: new fields get new numbers; nothing is renamed,
+  renumbered, or removed. Breaking changes mean a new versioned package (`v2`).
+- **Capabilities, not models**: requests name abilities ("instruct", "referee"); the
+  serving engine chooses and reports the model.
+- **Engine-private details stay private**: internal serving ports, log paths, and
+  process details do not cross this boundary.
+- Changes land here first, by PR/commit visible to all three projects, then propagate
+  by submodule bump — a shared proto is only shared if there is exactly one of it.
+
+## Relationship to the Open Inference Protocol
+
+This repository borrows OIP's *form* (versioned spec + proto, additive evolution) and
+reserves OIP itself as the **horizon peer protocol**: when heterogeneous serving stacks
+(KServe, Triton, external clusters) join the federation, `ModelInfer`/`ServerReady` are
+the lingua franca, and `zndx.engine.v1.Complete` maps onto them (chat-style completion
+with reasoning retention is a convenience surface OIP does not define; the mapping note
+lives in the spec doc). Until then, the zndx engines federate on this lighter contract.
+
+## Codegen
+
+Python (the current adopters):
+
+    python -m grpc_tools.protoc -Iproto \
+        --python_out=<dst> --grpc_python_out=<dst> \
+        proto/zndx/engine/v1/engine.proto
+
+Generated code is vendored per-project (committed beside the native stubs); the proto
+here is the single source of truth.
