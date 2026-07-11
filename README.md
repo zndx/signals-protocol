@@ -23,7 +23,7 @@ service is the federation face. One stub, any engine.
 
 | package | spec | status |
 |---|---|---|
-| `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — capability inference (`Complete`) + federation status (`Status`) |
+| `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — capability inference (`Complete`) + federation status (`Status`) + boundary-signal remediation (`Remediate`) |
 | `zndx.verify.v1` | — | RESERVED: verification artifacts on the wire (reasoner certificates, kvasir proof DAGs — the rase_types direction from Gaius) |
 
 ## Adopters

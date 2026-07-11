@@ -27,6 +27,75 @@ service Engine {
   rpc Complete(CompleteRequest) returns (CompleteResponse);
   // The federation-facing status surface: what capabilities this engine serves, on which GPUs.
   rpc Status(StatusRequest) returns (StatusResponse);
+  // Adapt to a boundary SIGNAL (Holland CAS / Signals & Boundaries). A membrane or reasoner DETECTED an
+  // adaptive-pressure event (a fictional external reference, an unsatisfiable class, version drift) and
+  // propagates it here with LIVE context; the engine's agent REASONS over it and returns a proposed
+  // correction. The correction lives in the agent's ADAPTATION, never a static rule at the boundary.
+  // STRICT LAYERING: the engine serves only the adaptive inference — the boundary that RAISED the signal,
+  // and the membrane that DISPOSES the correction + re-prompts, stay with the CALLER. Federable: Atelier's
+  // boundaries can raise signals across this face and any signals engine can serve the adaptation.
+  // (added 2026-07-11, aegir — the external-namespace remediation loop; additive v1.)
+  rpc Remediate(RemediationRequest) returns (RemediationResponse);
+}
+
+// The KIND of adaptive pressure a boundary detected. Additive-only: new kinds get new numbers.
+enum SignalKind {
+  SIGNAL_KIND_UNSPECIFIED = 0;
+  EXTERNAL_NAMESPACE_VIOLATION = 1; // a cco:/bfo:/fhir: reference that does NOT exist in the current authority
+  UNSATISFIABLE = 2;                // the reasoner entails the artifact can have no instances (disjointness/domain-range)
+  UNGROUNDED = 3;                   // no entailed path to a required upper ontology (BFO/CCO)
+  VERSION_DRIFT = 4;                // a real-but-SUPERSEDED IRI (legacy → current; e.g. bfo:0000052 → bfo:0000197)
+}
+
+// A live entry from the current authority — CONTEXT for the agent to reason over, NOT a mapping to apply.
+message Candidate {
+  string iri = 1;                   // the real IRI (e.g. cco:ont00000965)
+  string label = 2;                 // its authoritative label ("Prescriptive Information Content Entity")
+  string kind = 3;                  // class | objectproperty | dataproperty
+  float score = 4;                  // relevance from the live query (0 = exact/unranked)
+}
+
+// What the boundary detected — the signal itself.
+message BoundarySignal {
+  SignalKind kind = 1;
+  string subject = 2;               // the artifact under pressure (e.g. the full Manchester axiom)
+  string offending = 3;             // the specific token/reference that tripped the boundary
+  string reason = 4;                // the boundary's human-legible justification
+  string authority = 5;             // the authority + VERSION checked against (e.g. "CCO 2026-04-04", "BFO 2020")
+}
+
+// The live ENVIRONMENT the agent reasons over — queried at signal time, never baked.
+message SignalContext {
+  repeated Candidate candidates = 1; // live query of the current authority for plausible real entities
+  repeated string justification = 2; // e.g. the minimal disjointness / domain-range axioms for an UNSATISFIABLE
+  repeated Candidate anchors = 3;    // domain grounding anchors (the retrieval signal)
+  repeated string rules = 4;         // the invariants ("external namespaces may not be coined; coin only sdg:")
+}
+
+message RemediationRequest {
+  string capability = 1;            // names the ability, e.g. "reauthor" — not a model
+  BoundarySignal signal = 2;
+  SignalContext context = 3;
+  int32 max_tokens = 4;
+  float temperature = 5;
+}
+
+// The agent's SELF-ASSESSED disposition; the caller's membrane still verifies the correction.
+enum Disposition {
+  DISPOSITION_UNSPECIFIED = 0;
+  CORRECTED = 1;                    // re-authored with a real external IRI from the authority
+  COINED_LOCAL = 2;                 // coined in the caller's own namespace (sdg:) — no real external fit exists
+  UNRESOLVABLE = 3;                 // the agent cannot form a valid correction (escalate)
+}
+
+message RemediationResponse {
+  string correction = 1;            // the re-authored artifact (e.g. the corrected Manchester axiom)
+  Disposition disposition = 2;
+  string rationale = 3;             // the agent's reasoning for the correction (auditable)
+  string model = 4;
+  string reasoning_content = 5;
+  int32 completion_tokens = 6;
+  float latency_ms = 7;
 }
 
 message CompleteRequest {
