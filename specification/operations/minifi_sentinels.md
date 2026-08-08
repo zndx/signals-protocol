@@ -2,15 +2,21 @@
 
 **Status:** Binding design for federation process coordination  
 **Sentinel substrate:** [Apache MiNiFi C++](https://nifi.apache.org/minifi/) — reference tree `weathership/oss-minifi-cpp` (vendored as `components/minifi-cpp` in Signals)  
-**Scheduler instance (optional):** Apache YuniKorn on system-wide RKE2  
+**K8s target (system-wide RKE2):** **Knative Serving** (scale-to-zero) + **Apache YuniKorn** (admission/queues)  
 **Wire face:** `zndx.engine.v1` (engines) + MiNiFi **C2** (command & control) + **OTel** (activity truth)
 
 This document defines how federated projects (Ægir, Atelier, Gaius, Hermes/ACP,
 Signals) expose **long-running host work** to a **common control plane** without
 forcing every GPU/engine process into a kubelet.
 
-YuniKorn is **one admission/scheduling instance** of this approach—not the
-definition of it. The invariant substrate is **MiNiFi C++ sentinels**.
+| Piece | Role |
+|-------|------|
+| **MiNiFi C++** | Invariant **sentinel substrate** (agent, C2, flows, metrics) |
+| **Knative Serving** | **Required** K8s runtime class for sentinel Services — [scale-to-zero](https://knative.dev/docs/serving/autoscaling/scale-to-zero/) via KPA |
+| **YuniKorn** | **Admission/scheduling instance** for sentinel pods/apps on RKE2 (queues, fair-share, preemption of **claims**) |
+
+YuniKorn alone does not define scale-to-zero of pods; **Knative KPA** does.
+YuniKorn alone does not define the agent protocol; **MiNiFi C2 + OTel** do.
 
 ---
 
@@ -21,7 +27,7 @@ definition of it. The invariant substrate is **MiNiFi C++ sentinels**.
 | Engines run as **non-K8s** host processes (gRPC, vLLM, Flink, …) | Cross-project admission, fairness, visibility |
 | Advisory GPU leases (`/tmp/zndx-gpu-leases`) only **refuse** | Ability to **plan**, queue, and pre-empt claims |
 | Users need orientation across many agents/engines | Single overwatch surface (flows + C2 + metrics) |
-| Scale-to-zero of *claims*, not necessarily of model weights | Control footprint must exit when work completes |
+| Scale-to-zero of *claims* and control footprint | Idle sentinels must not consume cluster capacity |
 
 ---
 
@@ -29,26 +35,25 @@ definition of it. The invariant substrate is **MiNiFi C++ sentinels**.
 
 ```text
                     ┌──────────────────────────────────────┐
-                    │  Overwatch (NiFi / MiNiFi C2 UI +    │
-                    │  metrics / OTel dashboards)          │
+                    │  Overwatch (MiNiFi C2 UI + OTel +    │
+                    │  YK UI + Knative revisions)          │
                     └──────────────────┬───────────────────┘
                                        │ C2 heartbeats + commands
                                        │ OTel export
                     ┌──────────────────▼───────────────────┐
-                    │  MiNiFi C++ sentinel(s)               │
-                    │  • thin agent per workload or engine │
-                    │  • flow: probe engine, emit phase    │
-                    │  • optional: run as K8s pod on RKE2  │
+                    │  Knative Service / Revision          │
+                    │  (MiNiFi C++ sentinel container)     │
+                    │  KPA: scale 0 ↔ N when activated     │
                     └──────────────────┬───────────────────┘
                          │             │
-           zndx.engine.v1│             │ admitted by (optional)
+           zndx.engine.v1│             │ scheduled by
            Status /      │             │
            BeginWorkload │             ▼
                          │    ┌────────────────────┐
-                         │    │ YuniKorn (instance)│
-                         │    │ queues per project │
+                         │    │ YuniKorn           │
+                         │    │ queues root.{proj} │
                          │    │ admits sentinel    │
-                         │    │ apps / placeholders│
+                         │    │ pods / apps        │
                          │    └────────────────────┘
                          ▼
               Host engines (non-K8s)
@@ -59,12 +64,13 @@ definition of it. The invariant substrate is **MiNiFi C++ sentinels**.
 | Layer | Where | Job |
 |-------|-------|-----|
 | **Execution** | Host engine processes | Real work; `zndx.engine.v1` / OIP |
-| **Sentinel** | **MiNiFi C++** agent (host or RKE2 pod) | Represent work; **C2** + metrics + OTel; gate start/stop signals |
-| **Admission (optional instance)** | **YuniKorn** on RKE2 | Queue/fair-share/preempt **sentinel apps** (claims), not necessarily GPU pods |
-| **Identity** | Kerberos + SecretSpec | Principals for engines/agents (see [kerberos_and_secretspec.md](./kerberos_and_secretspec.md)) |
-| **Overwatch UI** | MiNiFi/NiFi C2 + OTel UIs | Orient operators to processes and agents in the federation |
+| **Sentinel process** | **MiNiFi C++** in container | C2 + flows + OTel; coordinate engines |
+| **Scale-to-zero runtime** | **Knative Serving** on RKE2 | KPA scales sentinel **revisions** to zero when idle ([docs](https://knative.dev/docs/serving/autoscaling/scale-to-zero/)) |
+| **Admission / multi-tenant scheduling** | **YuniKorn** on RKE2 | Queues, fair-share, preemption of sentinel **claims** |
+| **Identity** | Kerberos + SecretSpec | Principals for engines/agents ([kerberos_and_secretspec.md](./kerberos_and_secretspec.md)) |
+| **Overwatch** | C2 UI + OTel + YK UI + Knative | Orient operators to federation participants |
 
-**Hard rule:** Sentinels are **not** the GPU workers. They are discrete **command, control, and telemetry** agents that **coordinate** host engines.
+**Hard rule:** Sentinels are **not** the GPU workers. Knative scales the **sentinel Service**, not host model weights (unless a separate policy stops the engine).
 
 ---
 
@@ -72,33 +78,112 @@ definition of it. The invariant substrate is **MiNiFi C++ sentinels**.
 
 | Capability | MiNiFi C++ provides | Federation use |
 |------------|---------------------|----------------|
-| **C2** | HTTP REST C2: heartbeat, DESCRIBE, UPDATE, triggers ([C2.md](https://github.com/weathership/oss-minifi-cpp/blob/main/C2.md)) | Discrete command & control protocol to start/stop/reconfigure sentinels and surface agent inventory |
-| **Metrics** | System + processor metrics publishers ([METRICS.md](https://github.com/weathership/oss-minifi-cpp/blob/main/METRICS.md)) | Activity for scale-to-zero and overwatch |
-| **Flows** | Processors / extensions (incl. inference-related metrics in upstream) | Probe engines, scrape OTel, write phase events |
-| **Ops surface** | Deployable agent + C2 server UI path (NiFi/MiNiFi ops) | Overwatch-ready web orientation for federated systems |
-| **Footprint** | C++ agent, suitable as thin host or container process | Sentinel class process |
-
-YuniKorn remains valuable for **multi-tenant admission** of sentinel *applications* on RKE2. It is **not** required to run a single-engine lab sentinel on the host.
+| **C2** | HTTP REST C2: heartbeat, DESCRIBE, UPDATE ([C2.md](https://github.com/weathership/oss-minifi-cpp/blob/main/C2.md)) | Discrete command & control; inventory for overwatch |
+| **Metrics** | Metric publishers ([METRICS.md](https://github.com/weathership/oss-minifi-cpp/blob/main/METRICS.md)) | Feed OTel / activation signals |
+| **Flows** | Processors / extensions | Probe engines, emit phase, react to C2 |
+| **Ops surface** | Agent + C2 server path | Overwatch-ready web orientation |
+| **Footprint** | C++ agent, container-friendly | Knative Revision container |
 
 ---
 
-## 4. Lifecycle contract
+## 4. Knative Serving (required K8s target)
 
-### 4.1 Phases (OTel + C2 must agree)
+Sentinel workloads on RKE2 **must** be deployable as **Knative Services** (or equivalent Serving abstractions) so the cluster can use the **KnativePodAutoscaler (KPA)** and [scale to zero](https://knative.dev/docs/serving/autoscaling/scale-to-zero/).
 
-| Phase | Meaning | Sentinel behavior |
-|-------|---------|-------------------|
-| `requested` | Work intended | Sentinel created / C2 registered |
-| `admitted` | YK (if used) admitted app; else local admit | May signal engine to start |
-| `loading` | Engine loading model/weights | **Not idle** — do not scale-to-zero |
-| `running` | Serving / computing | Heartbeats + OTel activity |
-| `complete` | Success terminal | Sentinel exits; release claim |
-| `failed` | Error terminal | Sentinel exits with failure; release claim |
-| ` orphan` | Engine gone without complete | Timeout → failed; free queue |
+### 4.1 Why Knative (with YK)
 
-### 4.2 Required OTel attributes
+| Concern | Knative | YuniKorn |
+|---------|---------|----------|
+| Pod count → 0 when idle | **Yes** (KPA + `enable-scale-to-zero`) | No (schedules pods; does not own request-driven scale-to-zero) |
+| Multi-tenant queues / fair-share | Partial (namespace quotas) | **Yes** (hierarchical queues `root.{project}`) |
+| Cold start of thin agent | Activator + scale-from-zero | Ensures pod can be placed when demand exists |
+| GPU workers | **Out of scope** for sentinel Services | Same — do not request GPUs on sentinel pods |
 
-Every span/metric from sentinel or engine for a coordinated workload:
+**Composition:** YK **places and prioritizes** sentinel pods; Knative **creates and removes** them based on activation/idle. Both are required on the production K8s target; lab host-only MiNiFi (no Knative) remains valid for S1–S2.
+
+### 4.2 Scale-to-zero configuration (cluster)
+
+Follow Knative Serving autoscaler ConfigMap (`knative-serving` / `config-autoscaler`):
+
+| Setting | Federation default | Notes |
+|---------|-------------------|--------|
+| `enable-scale-to-zero` | **`true`** | [Global only](https://knative.dev/docs/serving/autoscaling/scale-to-zero/); requires **KPA** (not HPA-only mode) |
+| `scale-to-zero-grace-period` | default `30s` (tune if dropouts) | Upper bound for network programming before last replica removed |
+| `scale-to-zero-pod-retention-period` | `0s` lab; optional short retention prod | Min time last pod stays after scale-to-zero decision; per-revision annotation supported |
+
+Per-revision annotations (when needed):
+
+```yaml
+metadata:
+  annotations:
+    autoscaling.knative.dev/class: kpa.autoscaling.knative.dev
+    # optional: keep last pod briefly after idle
+    # autoscaling.knative.dev/scale-to-zero-pod-retention-period: "30s"
+```
+
+### 4.3 What drives “idle” for a sentinel Service
+
+Knative scales on **request concurrency / RPS** to the Service by default. Federation must **align activation with real work**:
+
+| Pattern | Use |
+|---------|-----|
+| **A. Request-driven (preferred)** | Each federated workload issues an HTTP activate (or long-poll) against the Knative Service while `loading`/`running`; ends when phase is `complete`/`failed` |
+| **B. Min-scale during window** | Set `autoscaling.knative.dev/min-scale: "1"` only while admitted; clear on complete (controller-owned) |
+| **C. Explicit terminate** | On `complete`/`failed`, delete Revision/Service or signal activator path so KPA sees zero traffic |
+
+**Do not** treat missing OTel scrapes alone as idle during `loading` (cold model load). Prefer:
+
+1. OTel `federation.phase` ∈ {`loading`,`running`} ⇒ keep activated  
+2. C2 AgentStatus healthy + engine Status healthy ⇒ keep activated  
+3. `complete` / `failed` / orphan timeout ⇒ stop activation ⇒ Knative → 0  
+
+### 4.4 Sentinel Knative Service shape (normative intent)
+
+```yaml
+# Illustrative — not a full production manifest
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: minifi-sentinel-aegir   # or per-workload naming
+  namespace: federation-aegir
+  labels:
+    federation.project: aegir
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/class: kpa.autoscaling.knative.dev
+        # YK queue via pod labels/annotations per cluster convention
+      labels:
+        federation.project: aegir
+        app.kubernetes.io/component: minifi-sentinel
+    spec:
+      containerConcurrency: 1   # one coordination session per pod when possible
+      containers:
+        - image: registry.example/minifi-sentinel:…
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          # NO gpu limits
+```
+
+---
+
+## 5. Lifecycle contract
+
+### 5.1 Phases (OTel + C2 + Knative must agree)
+
+| Phase | Meaning | Sentinel / Knative |
+|-------|---------|---------------------|
+| `requested` | Work intended | Create/activate Knative Service or route |
+| `admitted` | YK admitted pod (if used) | Pod Running; may handshake engine |
+| `loading` | Engine loading | **Keep activated** — not scale-to-zero |
+| `running` | Computing / serving | Heartbeats + OTel; keep activated |
+| `complete` | Success terminal | Stop activation → **KPA scale to zero** |
+| `failed` | Error terminal | Stop activation → scale to zero |
+| `orphan` | Engine gone | Timeout → failed → scale to zero |
+
+### 5.2 Required OTel attributes
 
 | Attribute | Example |
 |-----------|---------|
@@ -109,149 +194,139 @@ Every span/metric from sentinel or engine for a coordinated workload:
 | `federation.engine_endpoint` | `host:port` for `zndx.engine.v1` |
 | `federation.gpu_ids` | e.g. `[0,1]` when bound |
 | `federation.sentinel_id` | MiNiFi agent identifier |
+| `federation.knative_service` | Knative Service name |
+| `federation.knative_revision` | Active Revision (if known) |
 
-### 4.3 Engine gate
+### 5.3 Engine gate
 
 Host engines **must not** start exclusive GPU work for a federated workload until:
 
-1. Sentinel is **admitted** (or lab mode: sentinel local-running), and  
+1. Sentinel is **admitted** and **activated** (Knative min replicas ≥ 1, or lab host-local MiNiFi), and  
 2. Protocol handshake succeeded (`BeginWorkload` / equivalent), and  
-3. Kerberos ticket available (`secretspec run` → `kinit` — see kerberos doc).
+3. Kerberos ticket available (`secretspec run` → `kinit`).
 
-### 4.4 Scale-to-zero
+### 5.4 Scale-to-zero (summary)
 
-| Scale what | How |
-|------------|-----|
-| **Sentinel process / YK app** | Exit on `complete`/`failed`; YK app finishes; queue slot free |
-| **Host engine** | Optional: engine may remain warm; only **claim** scales to zero unless policy says stop endpoint |
-
-Scale-to-zero **never** relies on missing OTel scrapes alone during `loading`. Prefer explicit phase or C2 agent status.
+| Scale what | Mechanism |
+|------------|-----------|
+| **Sentinel pods** | **Knative KPA** → 0 ([scale-to-zero](https://knative.dev/docs/serving/autoscaling/scale-to-zero/)) when activation ends |
+| **YK queue claim** | App/pod gone → capacity free for other projects |
+| **Host engine** | Optional warm pool; not Knative’s job unless separately managed |
 
 ---
 
-## 5. C2 as discrete command & control
+## 6. C2 as discrete command & control
 
-MiNiFi C2 (see agent `C2.md`) provides:
-
-- **Heartbeats** — agent alive, optional full manifest then lightweight  
-- **DESCRIBE** — inventory (manifest, device, flow, queues)  
-- **UPDATE / triggers** — reconfigure flows, file triggers  
-
-Federation mapping:
+MiNiFi C2 provides heartbeats, DESCRIBE, UPDATE/triggers. Federation mapping:
 
 | C2 concept | Federation use |
 |------------|----------------|
 | Agent id | `federation.sentinel_id` |
-| DeviceInfo / AgentInformation | Host + project labels in overwatch |
-| FlowInformation | Which probe/coordination flow is active |
-| DESCRIBE manifest | Overwatch “who is participating” |
-| UPDATE flow | Push new coordination flow without redeploying engines |
-| Heartbeat absence | Orphan detection (with grace) |
+| DeviceInfo / AgentInformation | Overwatch inventory |
+| DESCRIBE manifest | Who is participating |
+| UPDATE flow | Reconfigure coordination without redeploying engines |
+| Heartbeat + phase | Complements Knative metrics for “still busy” |
 
-C2 does **not** replace `zndx.engine.v1` for model inference; it coordinates
-**sentinels and flows**. Engines remain the capability face.
+C2 does **not** replace `zndx.engine.v1` for inference. It does **not** replace Kerberos for Impala/Ranger.
 
 ---
 
-## 6. YuniKorn as an instance
-
-When RKE2-wide multi-tenant admission is required:
+## 7. YuniKorn as admission instance
 
 | Piece | Mapping |
 |-------|---------|
-| YK **application** | One federated workload claim |
-| YK **queue** | `root.{project}` (aegir, atelier, gaius, …) |
-| **Placeholder / thin pod** | Runs **MiNiFi C++ sentinel** (not vLLM) |
-| Pod resources | Tiny CPU/memory only — **no GPU** on sentinel by default |
-| Admission | Engine start gated on app Running |
-| Complete | Sentinel exits → app done → capacity free |
+| YK **queue** | `root.{project}` |
+| YK-scheduled pod | Knative-created MiNiFi sentinel pod |
+| Resources | Tiny CPU/memory — **no GPU** |
+| Preemption | Prefer preempt **idle/low-priority claims**, not `loading`/`running` without policy |
 
-Gang-scheduling placeholders (YK terminology) map cleanly to “sentinel up before workers,” even when workers are **off-cluster** engines.
+**Without YK (lab):** host-local MiNiFi + C2 + OTel still valid; no multi-tenant queue fairness.
 
-**Without YK:** host-local MiNiFi sentinels + C2 + OTel still provide overwatch and local coordination; co-tenancy may still use `/tmp/zndx-gpu-leases` until YK is on.
+**Without Knative (lab only):** host MiNiFi process; scale-to-zero of cluster footprint N/A until S3+.
 
 ---
 
-## 7. Overwatch UX
+## 8. Overwatch UX
 
-Operators orient via:
-
-1. **MiNiFi/NiFi C2 UI** — agents, heartbeats, DESCRIBE inventory, flow status  
-2. **OTel** (Grafana/etc.) — phase timelines, GPU binding, error rates  
-3. **YuniKorn UI** (when enabled) — queues, apps, preemption, fairness  
-4. **Marquez-web / Atlas** — lineage of work that hit Signals SoR  
-
-Together these answer: *who is participating, what are they doing, who is admitted, what data did they touch.*
+1. **MiNiFi/NiFi C2 UI** — agents, DESCRIBE, flows  
+2. **OTel** — phase timelines, GPU binding  
+3. **Knative** — Services/Revisions, activator, scale 0↔N  
+4. **YuniKorn UI** — queues, apps, preemption  
+5. **Marquez-web / Atlas** — lineage into Signals SoR  
 
 ---
 
-## 8. Adopter procedures
+## 9. Adopter procedures
 
-### 8.1 Vendor
+### 9.1 Vendor
 
 ```bash
-# In each federation project (or only signals as core host):
 git submodule add git@github.com:weathership/oss-minifi-cpp.git components/minifi-cpp
 # pin signals-protocol for this document
+# K8s target: RKE2 + Knative Serving + (recommended) YuniKorn
 ```
 
-### 8.2 Sentinel identity
+### 9.2 Sentinel identity
 
 | Item | Value |
 |------|--------|
 | Agent class | `minifi-sentinel` |
-| Labels | `federation.project`, `federation.workload_id` |
-| Kerberos | Sentinel rarely needs GSSAPI; **engine** must (see kerberos doc) |
-| SecretSpec | Only if sentinel calls protected APIs; prefer engine holds data-plane principal |
+| K8s labels | `federation.project`, `app.kubernetes.io/component=minifi-sentinel` |
+| Knative Service naming | `minifi-sentinel-{project}` or per-`workload_id` |
+| Kerberos | On **engine**; sentinel only if it calls protected APIs |
 
-### 8.3 Minimal flow responsibilities
+### 9.3 Minimal flow responsibilities
 
-1. Register with C2 (heartbeat + agent id).  
-2. Optionally wait for YK admission (if pod).  
-3. Call engine lifecycle (gRPC) to start workload.  
-4. Export OTel phase + scrape engine Status.  
-5. On complete/fail/timeout: signal engine if needed, exit cleanly.  
+1. Register with C2.  
+2. Run under Knative Service (prod) or host process (lab S1).  
+3. Stay activated while phase ∈ {`loading`,`running`}.  
+4. Handshake engine; export OTel.  
+5. On terminal phase: stop activation → Knative scales to zero; release YK claim.  
 
-### 8.4 Anti-patterns
+### 9.4 Anti-patterns
 
 | Don’t | Do |
 |-------|-----|
-| Put GPU in sentinel pod “for convenience” | Keep GPUs on host engines |
-| Start engine GPU work without admit/handshake | Gate on sentinel + protocol |
-| Scale-to-zero on scrape gaps during load | Use explicit `loading`/`running` phases |
-| Replace Kerberos with C2 auth for Impala | C2 for agents; Kerberos for data plane |
-| Invent a second overwatch protocol | Prefer C2 + OTel conventions here |
+| Deploy sentinel as plain Deployment without Knative in prod | Knative Service + KPA scale-to-zero |
+| Put GPUs on Knative sentinel | Host engines hold GPUs |
+| Use HPA-only mode that blocks scale-to-zero | Use **KPA** (`enable-scale-to-zero: true`) |
+| Scale to zero on scrape gaps during `loading` | Explicit phases + activation hold |
+| Assume YK alone zeros idle pods | Knative owns pod scale-to-zero |
 
 ---
 
-## 9. Relation to other ops specs
+## 10. Relation to other ops specs
 
 | Spec | Relation |
 |------|----------|
-| [Kerberos + SecretSpec](./kerberos_and_secretspec.md) | Principals for engines/ACP; sentinel usually does not replace them |
-| Co-tenancy (GPU leases) | Host-local mutual exclusion; YK+sentinels graduate to planned admission |
-| `zndx.engine.v1` | Capability inference and Status; sentinel is a client/coordinator |
+| [Kerberos + SecretSpec](./kerberos_and_secretspec.md) | Principals for engines/ACP |
+| Co-tenancy (GPU leases) | Host-local; YK+Knative+sentinels graduate cross-project claims |
+| `zndx.engine.v1` | Capability face; sentinel coordinates |
 
 ---
 
-## 10. Implementation phasing
+## 11. Implementation phasing
 
-| Phase | Deliverable |
-|-------|-------------|
-| **S0** | This document + `components/minifi-cpp` pin in Signals |
-| **S1** | Lab host MiNiFi sentinel flow: probe one engine Status + OTel phases + C2 heartbeat |
-| **S2** | C2 DESCRIBE inventory used in overwatch; document agent id conventions |
-| **S3** | RKE2 Deployment of thin MiNiFi sentinel; optional YK queue `root.{project}` |
-| **S4** | Gate `BeginWorkload` (or engine start) on sentinel admission |
-| **S5** | Scale-to-zero sentinels on complete; timeout orphans; YK app cleanup |
-| **S6** | Multi-project queues + preemption policy; retire pure refuse-only leases for cross-project windows |
+| Phase | Deliverable | Exit criterion |
+|-------|-------------|----------------|
+| **S0** | This document + `components/minifi-cpp` (+ yunikorn-core pin) | Spec + submodule on Signals trunk |
+| **S1** | Lab **host** MiNiFi: probe one engine Status + OTel phases + C2 heartbeat | Heartbeat visible; phases correct without K8s |
+| **S2** | C2 DESCRIBE inventory conventions; overwatch checklist | Multi-agent inventory via C2 |
+| **S3a** | **Knative Serving** installed on system RKE2; `enable-scale-to-zero: true` (KPA) | Cluster ConfigMap verified |
+| **S3b** | MiNiFi sentinel as **Knative Service** (single project) | Idle → **0 pods**; activate → scale from zero |
+| **S3c** | **YuniKorn** queues `root.{project}`; sentinel pods scheduled via YK | Queue metrics show project isolation |
+| **S4** | Gate engine `BeginWorkload` / GPU start on sentinel **activated + admitted** | No exclusive GPU work without claim |
+| **S5** | Terminal phase → drop activation → Knative zero; orphan timeouts; YK app cleanup | No stuck replicas after complete |
+| **S6** | Multi-project queues + preemption policy; retention/grace tuned; retire refuse-only leases for cross-project **windows** | Two projects fair-share sentinel claims under load |
+| **S7** | Harden: OTel↔activator coupling, C2 UPDATE flows, docs for adopters’ Knative Service templates | Runbook + smoke in CI or lab script |
 
 ---
 
-## 11. Summary
+## 12. Summary
 
-- **MiNiFi C++ sentinels** = federation process coordination substrate (C2 + metrics + flows + overwatch).  
-- **OTel** = activity truth for phases and scale-to-zero of **claims**.  
-- **YuniKorn** = optional **instance** of admission/scheduling for sentinel apps on RKE2.  
-- **Host gRPC engines** = actual work; Kerberos/Ranger unchanged.  
-- **signals-protocol** binds lifecycle, attributes, and procedures so every project participates the same way.
+- **MiNiFi C++** = sentinel substrate (C2 + flows + metrics + overwatch).  
+- **Knative Serving** = required K8s target for sentinel **scale-to-zero** ([KPA](https://knative.dev/docs/serving/autoscaling/scale-to-zero/)).  
+- **YuniKorn** = admission/fairness **instance** for those sentinel pods on RKE2.  
+- **OTel + C2** = activity truth so scale-to-zero does not kill `loading` work.  
+- **Host engines** = execution + Kerberos/Ranger.  
+- **signals-protocol** binds the lifecycle so every federation project participates the same way.
