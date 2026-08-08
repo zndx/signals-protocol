@@ -12,11 +12,18 @@ forcing every GPU/engine process into a kubelet.
 | Piece | Role |
 |-------|------|
 | **MiNiFi C++** | Invariant **sentinel substrate** (agent, C2, flows, metrics) |
-| **Knative Serving** | **Required** K8s runtime class for sentinel Services — [scale-to-zero](https://knative.dev/docs/serving/autoscaling/scale-to-zero/) via KPA |
-| **YuniKorn** | **Admission/scheduling instance** for sentinel pods/apps on RKE2 (queues, fair-share, preemption of **claims**) |
+| **Knative Serving** | **Required** K8s runtime for sentinel Services — [scale-to-zero](https://knative.dev/docs/serving/autoscaling/scale-to-zero/) via KPA |
+| **YuniKorn** | **Required** admission/scheduling on RKE2 (queues, fair-share, preemption of **claims**) |
 
-YuniKorn alone does not define scale-to-zero of pods; **Knative KPA** does.
-YuniKorn alone does not define the agent protocol; **MiNiFi C2 + OTel** do.
+**Product target is K8s-first:** system-wide **RKE2 + Knative Serving + YuniKorn**.
+There is **no supported long-term “no K8s” or “MiNiFi-only on the host” deployment**.
+Host-local MiNiFi, if used at all, is **temporary engineering scaffolding** while
+landing the agent image/flow—not a fallback product path and not a second
+architecture.
+
+YuniKorn alone does not scale pods to zero; **Knative KPA** does.
+Knative alone does not provide multi-tenant federation queues; **YuniKorn** does.
+Neither replaces **MiNiFi C2 + OTel** for agent protocol and activity truth.
 
 ---
 
