@@ -6,8 +6,12 @@ secrets, co-tenancy). Distinct from wire protocols under
 
 | Document | Status |
 |----------|--------|
-| [Kerberos + SecretSpec](./kerberos_and_secretspec.md) | **Binding** — how adopters join Signals core services with GSSAPI + Ranger |
-| Co-tenancy (GPU leases) | Planned (promote Gaius draft) |
+| [Kerberos + SecretSpec](./kerberos_and_secretspec.md) | **Binding** — join Signals core services with GSSAPI + Ranger |
+| [MiNiFi sentinels](./minifi_sentinels.md) | **Binding design** — process coordination via MiNiFi C++ (C2 + OTel); YuniKorn is one scheduler instance |
+| Co-tenancy (GPU leases) | Planned (promote Gaius draft; composes with sentinels) |
 
 Procedures land here first; each project implements via its own devenv and
 `secretspec.toml`, then bumps this submodule.
+
+**Sentinel substrate submodule (Signals):** `components/minifi-cpp` →
+`git@github.com:weathership/oss-minifi-cpp.git`.

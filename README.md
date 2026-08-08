@@ -26,16 +26,17 @@ service is the federation face. One stub, any engine.
 | `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — capability inference (`Complete`) + federation status (`Status`) + boundary-signal remediation (`Remediate`) |
 | `zndx.verify.v1` | — | RESERVED: verification artifacts on the wire (reasoner certificates, kvasir proof DAGs — the rase_types direction from Gaius) |
 
-## Operations (identity & secrets)
+## Operations (identity, secrets, process coordination)
 
-Wire protocols alone are not enough to use **Signals core services** (Atlas,
-Ranger, Impala, Kudu, GSSAPI FDW). Adopters must follow:
+Wire protocols alone are not enough to use **Signals core services** or to
+coordinate multi-engine host work. Adopters must follow:
 
 | Document | Purpose |
 |---|---|
 | [`specification/operations/kerberos_and_secretspec.md`](specification/operations/kerberos_and_secretspec.md) | **Binding** Kerberos principal catalog, SecretSpec allowlists, `kinit` process wrappers, Ranger onboarding |
+| [`specification/operations/minifi_sentinels.md`](specification/operations/minifi_sentinels.md) | **Binding design** — MiNiFi C++ sentinels (C2 + OTel); YuniKorn as optional admission instance on RKE2 |
 
-**Reference implementation:** [weathership/signals](https://github.com/weathership/signals) is the first federation project on Kerberos + SecretSpec. Sibling engines (Ægir, Atelier, Gaius, Hermes/ACP) should vendor this repo and implement those procedures—do not invent a parallel long-term identity path.
+**Reference implementation:** [weathership/signals](https://github.com/weathership/signals) is the first federation project on Kerberos + SecretSpec, and vendors **MiNiFi C++** (`components/minifi-cpp`) and **YuniKorn core** (`components/yunikorn-core`) for sentinel coordination. Sibling engines should implement these procedures—do not invent a parallel long-term identity or process-control path.
 
 ## Adopters
 
@@ -49,6 +50,9 @@ Ranger, Impala, Kudu, GSSAPI FDW). Adopters must follow:
 
 GPU co-tenancy rides the shared advisory lease dir `/tmp/zndx-gpu-leases` (per-GPU-set
 lock files, project-tagged owners) plus each engine's authoritative nvidia-smi probe.
+Cross-project **admission and overwatch** graduate to **MiNiFi sentinels** (C2 + OTel),
+with **YuniKorn** as an optional RKE2 scheduler instance — see
+[`specification/operations/minifi_sentinels.md`](specification/operations/minifi_sentinels.md).
 
 ## Evolution rules
 
