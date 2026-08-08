@@ -26,13 +26,26 @@ service is the federation face. One stub, any engine.
 | `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — capability inference (`Complete`) + federation status (`Status`) + boundary-signal remediation (`Remediate`) |
 | `zndx.verify.v1` | — | RESERVED: verification artifacts on the wire (reasoner certificates, kvasir proof DAGs — the rase_types direction from Gaius) |
 
+## Operations (identity & secrets)
+
+Wire protocols alone are not enough to use **Signals core services** (Atlas,
+Ranger, Impala, Kudu, GSSAPI FDW). Adopters must follow:
+
+| Document | Purpose |
+|---|---|
+| [`specification/operations/kerberos_and_secretspec.md`](specification/operations/kerberos_and_secretspec.md) | **Binding** Kerberos principal catalog, SecretSpec allowlists, `kinit` process wrappers, Ranger onboarding |
+
+**Reference implementation:** [weathership/signals](https://github.com/weathership/signals) is the first federation project on Kerberos + SecretSpec. Sibling engines (Ægir, Atelier, Gaius, Hermes/ACP) should vendor this repo and implement those procedures—do not invent a parallel long-term identity path.
+
 ## Adopters
 
 | project | native service | shared service | gRPC port |
 |---|---|---|---|
+| signals | (core services host) | n/a — Atlas/Ranger/Impala/Kudu | — |
 | aegir | `aegir.engine.AegirEngine` | `zndx.engine.v1.Engine` (from next restart) | :50151 |
 | atelier | `atelier.engine.AtelierEngine` | planned | :50251 |
 | gaius | (see `gaius FEDERATION.md`) | planned | :50051 |
+| hermes-agent | ACP / plugins | planned (client of core + engines) | — |
 
 GPU co-tenancy rides the shared advisory lease dir `/tmp/zndx-gpu-leases` (per-GPU-set
 lock files, project-tagged owners) plus each engine's authoritative nvidia-smi probe.
