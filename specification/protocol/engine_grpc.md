@@ -36,6 +36,30 @@ The federation-facing view: `project` (who answered), per-capability `Endpoint`
 `total_gpus`. Engine-private details (internal ports, log paths) are deliberately
 absent.
 
+## Server reflection (required)
+
+Every engine that exposes `zndx.engine.v1.Engine` on the federation lattice
+**MUST** enable [gRPC server reflection](https://github.com/grpc/grpc/blob/master/doc/server-reflection.md)
+on that same listen port and advertise at least:
+
+- `zndx.engine.v1.Engine`
+- `grpc.reflection.v1alpha.ServerReflection` (or the reflection service name
+  your stack registers)
+
+**Rationale (OIP-aligned):** the contract is defined by protobuf/gRPC. Reflection
+is how operators and lattice CI invoke that contract with standard tools
+(`grpcurl host:port zndx.engine.v1.Engine/Status`) without shipping a second
+descriptor path. We define this in install/configuration — it is not optional DX.
+
+| Requirement | Detail |
+|-------------|--------|
+| Python engines | depend on `grpcio-reflection` (or equivalent) and enable reflection at server start |
+| Accept probe | bare `grpcurl -plaintext <host>:<port> zndx.engine.v1.Engine/Status` must succeed |
+| Lattice CI | uses reflection; engines without it **FAIL** |
+
+Loading `.proto` files on the client is a development aid for offline codegen, not
+the federation accept path.
+
 ## Co-tenancy conventions (informative)
 
 Engines share one host and six GPUs today. The advisory lease layer is the shared lock
