@@ -36,7 +36,24 @@ The federation-facing view: `project` (who answered), per-capability `Endpoint`
 `total_gpus`. Engine-private details (internal ports, log paths) are deliberately
 absent.
 
-## Server reflection (required)
+## How the specification is consumed
+
+**The `.proto` files are the specification** (same stance as
+[OIP inference_grpc](https://github.com/kserve/open-inference-protocol/blob/main/specification/protocol/inference_grpc.md)).
+Implementations **code-generate** stubs/clients from those protos. First-party
+tooling (lattice CI, unit start probes, peer clients) **SHOULD** use generated
+bindings — that is implementing the protocol properly.
+
+| Consumer | Preferred mechanism |
+|----------|---------------------|
+| Engines / our scripts / libraries | **Codegen** from `proto/` (committed or build-step) |
+| External operators / ad-hoc tooling | **gRPC server reflection** so bare `grpcurl` works |
+
+Reflection does **not** replace the proto; it exposes the live service so tools
+that do not ship our tree can still call `zndx.engine.v1.Engine` without local
+descriptor flags.
+
+## Server reflection (required on lattice ports)
 
 Every engine that exposes `zndx.engine.v1.Engine` on the federation lattice
 **MUST** enable [gRPC server reflection](https://github.com/grpc/grpc/blob/master/doc/server-reflection.md)
@@ -46,19 +63,14 @@ on that same listen port and advertise at least:
 - `grpc.reflection.v1alpha.ServerReflection` (or the reflection service name
   your stack registers)
 
-**Rationale (OIP-aligned):** the contract is defined by protobuf/gRPC. Reflection
-is how operators and lattice CI invoke that contract with standard tools
-(`grpcurl host:port zndx.engine.v1.Engine/Status`) without shipping a second
-descriptor path. We define this in install/configuration — it is not optional DX.
-
 | Requirement | Detail |
 |-------------|--------|
 | Python engines | depend on `grpcio-reflection` (or equivalent) and enable reflection at server start |
-| Accept probe | bare `grpcurl -plaintext <host>:<port> zndx.engine.v1.Engine/Status` must succeed |
-| Lattice CI | uses reflection; engines without it **FAIL** |
+| External accept | bare `grpcurl -plaintext <host>:<port> zndx.engine.v1.Engine/Status` succeeds |
+| First-party CI | generated-stub Status client **and** reflection check |
 
-Loading `.proto` files on the client is a development aid for offline codegen, not
-the federation accept path.
+`grpcurl -proto …` against a live engine is fine for debugging, but first-party
+automation should prefer **generated clients** from the same protos engines use.
 
 ## Co-tenancy conventions (informative)
 
