@@ -36,6 +36,11 @@ service Engine {
   // boundaries can raise signals across this face and any signals engine can serve the adaptation.
   // (added 2026-07-11, aegir — the external-namespace remediation loop; additive v1.)
   rpc Remediate(RemediationRequest) returns (RemediationResponse);
+  // C2 (or a later NiFi processor) tells the owning engine to end the local
+  // process that a YK-admitted sentinel Application represents. Sentinels
+  // never call this; they speak MiNiFi C2 HTTP to the C2 server, which is a
+  // gRPC client of this RPC.
+  rpc Yield(YieldRequest) returns (YieldResponse);
 }
 
 // The KIND of adaptive pressure a boundary detected. Additive-only: new kinds get new numbers.
@@ -134,4 +139,27 @@ message StatusResponse {
   string project = 1;             // "aegir" | "atelier" | "gaius" — who answered
   repeated Endpoint endpoints = 2;
   int32 total_gpus = 3;
+}
+
+// Why C2 is asking the engine to drop a host process.
+enum YieldReason {
+  YIELD_REASON_UNSPECIFIED = 0;
+  YIELD_REASON_PREEMPTED = 1;  // YK ended the sentinel Application
+  YIELD_REASON_COMPLETED = 2;  // work done; drop coupling
+  YIELD_REASON_ORPHAN = 3;     // heartbeat lost / no last-gasp
+  YIELD_REASON_UNIT_STOP = 4;  // peer-scoped unit stop
+}
+
+message YieldRequest {
+  string workload_id = 1;   // shared key: YK app / C2 agent / OTel
+  YieldReason reason = 2;
+  string sentinel_id = 3;
+  string detail = 4;
+}
+
+message YieldResponse {
+  bool ok = 1;
+  bool process_ended = 2;
+  bool restore_started = 3;  // evict/restore plan if the engine had one
+  string message = 4;
 }

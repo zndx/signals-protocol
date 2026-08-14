@@ -77,7 +77,11 @@ Neither replaces **MiNiFi C2 + OTel** for agent protocol and activity truth.
 | **Identity** | Kerberos + SecretSpec | Principals for engines/agents ([kerberos_and_secretspec.md](./kerberos_and_secretspec.md)) |
 | **Overwatch** | C2 UI + OTel + YK UI + Knative | Orient operators to federation participants |
 
-**Hard rule:** Sentinels are **not** the GPU workers. Knative scales the **sentinel Service**, not host model weights (unless a separate policy stops the engine).
+**Hard rule:** A MiNiFi sentinel **is** the YuniKorn Application (1:1 with a
+schedulable process). YK ends that Application; the Signals C2 server calls
+`zndx.engine.v1.Engine/Yield` over gRPC; the owning engine ends the host
+process. The sentinel is not a second catalog beside Applications. Host
+CUDA stays on the engine unless a later cut puts the work *in* the pod.
 
 ---
 
@@ -104,7 +108,7 @@ Sentinel workloads on RKE2 **must** be deployable as **Knative Services** (or eq
 | Pod count → 0 when idle | **Yes** (KPA + `enable-scale-to-zero`) | No (schedules pods; does not own request-driven scale-to-zero) |
 | Multi-tenant queues / fair-share | Partial (namespace quotas) | **Yes** (hierarchical queues `root.{project}`) |
 | Cold start of thin agent | Activator + scale-from-zero | Ensures pod can be placed when demand exists |
-| GPU workers | **Out of scope** for sentinel Services | Same — do not request GPUs on sentinel pods |
+| GPU workers | Sentinel is the **claim**; GPU on the pod is a later cut | Host engines hold CUDA today; Yield drops the process |
 
 **Composition (always the target):** YK **places and prioritizes** sentinel pods;
 Knative **creates/removes** them based on activation/idle. Implement against
@@ -209,11 +213,13 @@ spec:
 
 ### 5.3 Engine gate
 
-Host engines **must not** start exclusive GPU work for a federated workload until:
+Host engines **must not** start exclusive host work for a federated workload until:
 
-1. Sentinel is **admitted** (YuniKorn) and **activated** (Knative revision ≥ 1), and  
-2. Protocol handshake succeeded (`BeginWorkload` / equivalent), and  
-3. Kerberos ticket available (`secretspec run` → `kinit`).
+1. Sentinel is **admitted** (YuniKorn Application) and **activated** (Knative revision ≥ 1), and  
+2. C2 has a heartbeat for that `workload_id`, and  
+3. Kerberos ticket available (`secretspec run` → `kinit`) when the work needs it.
+
+YK preemption: last-gasp → C2 → `Engine/Yield` → engine ends the process.
 
 ### 5.4 Scale-to-zero (summary)
 
@@ -227,17 +233,25 @@ Host engines **must not** start exclusive GPU work for a federated workload unti
 
 ## 6. C2 as discrete command & control
 
-MiNiFi C2 provides heartbeats, DESCRIBE, UPDATE/triggers. Federation mapping:
+One **Signals-owned C2 server** (HTTP) for all sentinels. It is not NiFi
+and not each engine. Two wires:
+
+| Wire | Direction | Protocol |
+|------|-----------|----------|
+| Heartbeat / last-gasp | sentinel → C2 | MiNiFi C2 HTTP |
+| **Yield** | C2 → owning engine | `zndx.engine.v1.Engine/Yield` gRPC |
 
 | C2 concept | Federation use |
 |------------|----------------|
 | Agent id | `federation.sentinel_id` |
-| DeviceInfo / AgentInformation | Overwatch inventory |
-| DESCRIBE manifest | Who is participating |
-| UPDATE flow | Reconfigure coordination without redeploying engines |
-| Heartbeat + phase | Complements Knative metrics for “still busy” |
+| `workload_id` | Shared key with YK Application + Yield |
+| Last-gasp / `phase=preempted` | YK ended the Application → C2 Yields |
+| Missed heartbeat | `YIELD_REASON_ORPHAN` fallback |
+| DESCRIBE / UPDATE | Later; not required for yield |
 
-C2 does **not** replace `zndx.engine.v1` for inference. It does **not** replace Kerberos for Impala/Ranger.
+C2 does **not** replace `zndx.engine.v1` for inference. Engines do **not**
+implement C2 REST. NiFi canvas is an optional later OTel/wiring fielding,
+not the C2 server and not signals-ui.
 
 ---
 
@@ -247,8 +261,8 @@ C2 does **not** replace `zndx.engine.v1` for inference. It does **not** replace 
 |-------|---------|
 | YK **queue** | `root.{project}` |
 | YK-scheduled pod | Knative-created MiNiFi sentinel pod |
-| Resources | Tiny CPU/memory — **no GPU** |
-| Preemption | Prefer preempt **idle/low-priority claims**, not `loading`/`running` without policy |
+| Resources | Claim vector of the process (CPU/memory now; GPU claim later) |
+| Preemption | YK ends the Application → C2 last-gasp → Engine/Yield |
 
 YK and Knative are **co-equal** parts of the K8s target, not progressive
 optional extras. Do not ship code paths that treat “plain Deployment without
@@ -298,8 +312,10 @@ git submodule add git@github.com:weathership/oss-minifi-cpp.git components/minif
 | Don’t | Do |
 |-------|-----|
 | Support a permanent host-only / no-K8s product path | RKE2 + Knative + YK is the target; no dual architecture |
-| Deploy sentinel as plain Deployment “for simplicity” | Knative Service + KPA scale-to-zero |
-| Put GPUs on Knative sentinel | Host engines hold GPUs |
+| Deploy sentinel as plain Deployment “for simplicity” | Knative Service + KPA scale-to-zero (Job/Pod ok for a one-shot proof) |
+| Treat sentinels as a UI catalog beside Applications | Applications **is** the sentinel fleet (YK rows only) |
+| Engine implements C2 REST | Signals C2 HTTP; engine implements **Yield** gRPC |
+| Fold NiFi canvas into signals-ui | NiFi+canvas only when fielded on K8s; independent |
 | Use HPA-only mode that blocks scale-to-zero | Use **KPA** (`enable-scale-to-zero: true`) |
 | Scale to zero on scrape gaps during `loading` | Explicit phases + activation hold |
 | Assume YK alone zeros idle pods | Knative owns pod scale-to-zero; YK owns multi-tenant admission |
@@ -330,7 +346,7 @@ labels, phase schema, and C2 agent ids as the Knative Service will use.
 | **S1** | MiNiFi **flow + image** oriented to Knative (probe engine Status, OTel phases, C2 heartbeat). May run the **same** binary/flow under a throwaway local process only to debug agent logic | Flow + phase schema freeze; artifact is a **container image** destined for Knative, not a host package product |
 | **S2** | Vendor charts/images into **`signals-federation`** Zarf package; deploy via Zarf (+ converge FSM) on RKE2; first MiNiFi sentinel **Knative Service** on queue `root.{project}` | Package create closed; idle → **0 pods** (KPA); YK shows app/queue |
 | **S3** | C2 DESCRIBE inventory + overwatch against **live** Knative-scaled agents | Multi-project agents visible via C2 while scaled in |
-| **S4** | Gate engine `BeginWorkload` / GPU start on sentinel **YK-admitted + Knative-activated** | No exclusive GPU work without claim |
+| **S4** | Gate engine process start on sentinel **YK-admitted + C2 heartbeat**; C2 last-gasp → `Engine/Yield` | No exclusive host work without a YK Application; Yield ends the process |
 | **S5** | Terminal phase → drop activation → Knative zero; orphan timeouts; YK cleanup | No stuck replicas after complete |
 | **S6** | Multi-project fair-share + preemption; grace/retention tuned; host leases only for **intra-node** co-tenancy under YK windows | Two projects fair-share sentinel claims under load |
 | **S7** | Harden activator↔OTel, C2 UPDATE, adopter Service templates + smoke | Runbook; CI or lab script against RKE2 |

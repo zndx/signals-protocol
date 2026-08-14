@@ -23,7 +23,7 @@ service is the federation face. One stub, any engine.
 
 | package | spec | status |
 |---|---|---|
-| `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — capability inference (`Complete`) + federation status (`Status`) + boundary-signal remediation (`Remediate`) |
+| `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — `Complete` + `Status` + `Remediate` + **`Yield`** (C2→engine: end the host process for a YK sentinel Application) |
 | `zndx.scheduler.v1` | [`specification/protocol/scheduler_grpc.md`](specification/protocol/scheduler_grpc.md) | v1 — federated **scheduler** capability (queues, policy, projection). Lab backend: YuniKorn; not a vendor in the service name |
 | `zndx.verify.v1` | — | RESERVED: verification artifacts on the wire (reasoner certificates, kvasir proof DAGs — the rase_types direction from Gaius) |
 
@@ -51,8 +51,8 @@ coordinate multi-engine host work. Adopters must follow:
 
 GPU co-tenancy rides the shared advisory lease dir `/tmp/zndx-gpu-leases` (per-GPU-set
 lock files, project-tagged owners) plus each engine's authoritative nvidia-smi probe.
-Cross-project **admission and overwatch** graduate to **MiNiFi sentinels** (C2 + OTel),
-with **YuniKorn** as an optional RKE2 scheduler instance — see
+Cross-project **admission** is YuniKorn (sentinel **is** the Application).
+**Yield** is C2 HTTP → `Engine/Yield` gRPC. See
 [`specification/operations/minifi_sentinels.md`](specification/operations/minifi_sentinels.md).
 
 ## Evolution rules

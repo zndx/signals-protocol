@@ -29,6 +29,24 @@ Errors surface as gRPC status codes; the engine stays up (INTERNAL for serving
 failures, UNAVAILABLE while a capability is cold-loading if the engine chooses not to
 block).
 
+## Yield
+
+C2 → engine only. The Signals-owned C2 server (gRPC client) calls `Yield` on
+the owning lattice engine after a sentinel last-gasp or missed heartbeat.
+The engine ends the **local process** that `workload_id` names (the process
+the engine started). Idempotent: unknown `workload_id` returns `ok=true`,
+`process_ended=false`.
+
+| field | semantics |
+|---|---|
+| `workload_id` | Shared key with the YK Application / C2 agent / OTel |
+| `reason` | `PREEMPTED` (YK ended the sentinel), `COMPLETED`, `ORPHAN`, `UNIT_STOP` |
+| `sentinel_id` | MiNiFi agent id when known |
+| `detail` | Optional human note |
+
+Not inference (`Complete`). Not ontology (`Remediate`). Not a Gaius-native
+RPC. Sentinels never dial gRPC.
+
 ## Status
 
 The federation-facing view: `project` (who answered), per-capability `Endpoint`
