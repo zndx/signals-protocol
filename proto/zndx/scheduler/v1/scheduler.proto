@@ -1,0 +1,361 @@
+// zndx.scheduler.v1 — federated *scheduler* capability (not a vendor).
+//
+// WHY a separate service: queue / job admission is not inference. Crowding
+// Engine with policy lifecycle RPCs blurs capability boundaries. Engine keeps
+// Complete / Status / Remediate; this service is the platform scheduler face.
+//
+// CAPABILITY, NOT IMPLEMENTATION:
+//   Status on zndx.engine.v1.Engine advertises capability="scheduler" and
+//   model="<backend>" (lab: "yunikorn"; later "slurm", "pbs", …).
+//   Thin clients MUST NOT name a vendor. The engine privately talks to the
+//   backend (YK REST + ConfigMap, SLURM REST/CLI, PBS, …).
+//
+// VOCABULARY (backend-mapped, not YuniKorn-shaped):
+//   partition    — scheduling domain (YK partition, SLURM partition, PBS server)
+//   queue        — named share / ACL / quota tree node
+//   application  — submitted workload (YK app, SLURM/PBS job)
+//   task         — running allocation (YK container, SLURM step, PBS task)
+//   node         — schedulable host
+//   resource keys — backend-defined strings (memory/vcore/pods vs ncpus/mem/gres)
+//
+// Registered BESIDE zndx.engine.v1.Engine on the Signals lattice port
+// (multi-service gRPC). Additive-only within v1.
+//
+// Spec: specification/protocol/scheduler_grpc.md
+
+syntax = "proto3";
+package zndx.scheduler.v1;
+
+service Scheduler {
+  // ── Runtime (backend-private; product clients stay on this service) ──
+  rpc ListPartitions(ListPartitionsRequest) returns (ListPartitionsResponse);
+  rpc GetQueueTree(GetQueueTreeRequest) returns (GetQueueTreeResponse);
+  rpc GetQueue(GetQueueRequest) returns (GetQueueResponse);
+  rpc ListQueueApplications(ListQueueApplicationsRequest) returns (ListQueueApplicationsResponse);
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc GetPlacementPolicy(GetPlacementPolicyRequest) returns (GetPlacementPolicyResponse);
+  rpc GetDeclaredConfig(GetDeclaredConfigRequest) returns (GetDeclaredConfigResponse);
+  rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc GetDashboard(GetDashboardRequest) returns (GetDashboardResponse);
+
+  // ── Projection lifecycle (Signals-owned; Aegir-shaped roots) ──────────
+  // current = active policy view + live overlay
+  // scratch = edit/review pending promote
+  // archive = freezes of past applied configs
+  rpc SyncProjection(SyncProjectionRequest) returns (SyncProjectionResponse);
+  rpc GetProjectionIndex(GetProjectionIndexRequest) returns (GetProjectionIndexResponse);
+  rpc GetProjectionNote(GetProjectionNoteRequest) returns (GetProjectionNoteResponse);
+  rpc WriteScratchConfig(WriteScratchConfigRequest) returns (WriteScratchConfigResponse);
+  rpc DiffConfig(DiffConfigRequest) returns (DiffConfigResponse);
+  rpc PromoteScratch(PromoteScratchRequest) returns (PromoteScratchResponse);
+  rpc ListArchives(ListArchivesRequest) returns (ListArchivesResponse);
+  rpc RestoreArchiveToScratch(RestoreArchiveToScratchRequest) returns (RestoreArchiveToScratchResponse);
+}
+
+// ── Roots ───────────────────────────────────────────────────────────────
+
+enum ProjectionRoot {
+  PROJECTION_ROOT_UNSPECIFIED = 0;
+  CURRENT = 1;   // active / authority for what should control allocations
+  SCRATCH = 2;   // WIP edit surface
+  ARCHIVE = 3;   // freezes (list uses archive_id on note path)
+}
+
+// Opaque policy document. Backend chooses media_type + body shape.
+// Lab YuniKorn: media_type=text/yaml, body=queues.yaml partitions document.
+message PolicyDocument {
+  string media_type = 1;  // e.g. text/yaml, application/json, text/plain
+  string body = 2;
+}
+
+// ── Ops messages ────────────────────────────────────────────────────────
+
+message ListPartitionsRequest {}
+
+message PartitionInfo {
+  string name = 1;
+  string state = 2;
+  string site_id = 3;                // cluster / site / RM id (backend)
+  map<string, int64> capacity = 4;   // backend resource keys
+  map<string, int64> used_capacity = 5;
+  int32 total_nodes = 6;
+  bool preemption_enabled = 7;
+}
+
+message ListPartitionsResponse {
+  repeated PartitionInfo partitions = 1;
+}
+
+message GetQueueTreeRequest {
+  string partition = 1;  // empty = backend default
+}
+
+message ResourceMap {
+  map<string, int64> quantities = 1;  // backend keys
+}
+
+message QueueNode {
+  string name = 1;                     // FQN e.g. root.signals
+  string status = 2;
+  bool is_leaf = 3;
+  bool is_managed = 4;
+  string parent = 5;
+  ResourceMap max = 6;
+  ResourceMap guaranteed = 7;
+  ResourceMap allocated = 8;
+  ResourceMap pending = 9;
+  ResourceMap headroom = 10;
+  map<string, double> abs_used_capacity = 11;  // fraction or percent (backend)
+  int32 max_running_apps = 12;
+  int32 running_apps = 13;
+  string sorting_policy = 14;
+  bool preemption_enabled = 15;
+  map<string, string> properties = 16;
+  repeated QueueNode children = 17;
+}
+
+message GetQueueTreeResponse {
+  string partition = 1;
+  QueueNode root = 2;
+}
+
+message GetQueueRequest {
+  string partition = 1;
+  string queue = 2;       // FQN
+  bool include_subtree = 3;
+}
+
+message GetQueueResponse {
+  string partition = 1;
+  QueueNode queue = 2;
+}
+
+message ListQueueApplicationsRequest {
+  string partition = 1;
+  string queue = 2;
+}
+
+message ApplicationInfo {
+  string application_id = 1;
+  string state = 2;
+  string queue_name = 3;
+  string user = 4;
+  ResourceMap used = 5;
+  int64 submission_time_ns = 6;
+}
+
+message ListQueueApplicationsResponse {
+  repeated ApplicationInfo applications = 1;
+}
+
+message ListNodesRequest {
+  string partition = 1;
+}
+
+message NodeInfo {
+  string node_id = 1;
+  string host_name = 2;
+  string rack_name = 3;
+  ResourceMap capacity = 4;
+  ResourceMap allocated = 5;
+  ResourceMap available = 6;
+  bool schedulable = 7;
+}
+
+message ListNodesResponse {
+  repeated NodeInfo nodes = 1;
+}
+
+message GetPlacementPolicyRequest {
+  string partition = 1;
+}
+
+message PlacementRule {
+  string name = 1;
+  map<string, string> parameters = 2;
+}
+
+message GetPlacementPolicyResponse {
+  repeated PlacementRule rules = 1;
+}
+
+message GetDeclaredConfigRequest {}
+
+message GetDeclaredConfigResponse {
+  PolicyDocument document = 1;
+}
+
+message ValidateConfigRequest {
+  PolicyDocument document = 1;
+}
+
+message ValidateConfigResponse {
+  bool ok = 1;
+  string message = 2;
+  repeated string errors = 3;
+}
+
+message HealthRequest {}
+
+message HealthCheck {
+  string name = 1;
+  bool succeeded = 2;
+  string description = 3;
+  string diagnosis = 4;
+}
+
+message HealthResponse {
+  bool healthy = 1;
+  string backend = 2;  // implementation id (yunikorn, slurm, pbs, …)
+  repeated HealthCheck checks = 3;
+}
+
+// ── Dashboard (landing Scheduler band) ─────────────────────────────────
+
+message GetDashboardRequest {
+  string partition = 1;  // empty = first / default
+}
+
+message SchedulerSummary {
+  string name = 1;              // site / cluster display name
+  string backend = 2;           // yunikorn | slurm | pbs | …
+  string status = 3;            // partition / domain state
+  int32 total_nodes = 4;
+  string node_sort_policy = 5;
+  int32 total_applications = 6;
+  int32 total_tasks = 7;        // running allocations
+  string partition = 8;
+  string site_id = 9;
+}
+
+message StatusSlice {
+  string label = 1;   // Running, Completed, …
+  int32 count = 2;
+}
+
+message HistoryPoint {
+  int64 timestamp_ns = 1;
+  int64 value = 2;
+}
+
+message UtilBucket {
+  string bucket_name = 1;  // 0-10%, 10-20%, …
+  int32 num_nodes = 2;
+}
+
+message ResourceUtilization {
+  string resource_type = 1;  // backend key
+  repeated UtilBucket buckets = 2;
+}
+
+message GetDashboardResponse {
+  SchedulerSummary summary = 1;
+  repeated StatusSlice application_status = 2;
+  repeated StatusSlice task_status = 3;
+  repeated HistoryPoint application_history = 4;
+  repeated HistoryPoint task_history = 5;
+  repeated ResourceUtilization node_utilizations = 6;
+  bool healthy = 7;
+  string partition = 8;
+  repeated string partitions = 9;
+}
+
+// ── Projection ──────────────────────────────────────────────────────────
+
+message SyncProjectionRequest {
+  // Rebuild current from live ops + declared config. Does not touch scratch.
+  string partition = 1;
+}
+
+message SyncProjectionResponse {
+  int32 notes_written = 1;
+  string config_path = 2;  // relative under projection root
+}
+
+message GetProjectionIndexRequest {
+  ProjectionRoot root = 1;
+  string archive_id = 2;  // required when root=ARCHIVE
+}
+
+message ProjectionNoteMeta {
+  string id = 1;
+  string title = 2;
+  string kind = 3;
+  ProjectionRoot root = 4;
+  string relpath = 5;
+  repeated string links = 6;
+}
+
+message GetProjectionIndexResponse {
+  repeated ProjectionNoteMeta notes = 1;
+  int32 total = 2;
+}
+
+message GetProjectionNoteRequest {
+  ProjectionRoot root = 1;
+  string note_id = 2;
+  string archive_id = 3;
+}
+
+message GetProjectionNoteResponse {
+  string id = 1;
+  string title = 2;
+  string kind = 3;
+  string body = 4;
+  string frontmatter_json = 5;
+  repeated string links = 6;
+}
+
+message WriteScratchConfigRequest {
+  PolicyDocument document = 1;
+  bool rebuild_notes = 2;
+}
+
+message WriteScratchConfigResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message DiffConfigRequest {
+  bool include_live = 1;
+}
+
+message DiffConfigResponse {
+  string unified_diff = 1;  // scratch vs current
+  string live_diff = 2;     // current vs live (if include_live)
+}
+
+message PromoteScratchRequest {
+  bool dry_run = 1;
+  string archive_stamp = 2;
+}
+
+message PromoteScratchResponse {
+  bool ok = 1;
+  string message = 2;
+  string archive_id = 3;
+  bool applied = 4;
+  ValidateConfigResponse validation = 5;
+}
+
+message ListArchivesRequest {}
+
+message ArchiveInfo {
+  string id = 1;
+  string created_at = 2;
+  string note = 3;
+}
+
+message ListArchivesResponse {
+  repeated ArchiveInfo archives = 1;
+}
+
+message RestoreArchiveToScratchRequest {
+  string archive_id = 1;
+}
+
+message RestoreArchiveToScratchResponse {
+  bool ok = 1;
+  string message = 2;
+}

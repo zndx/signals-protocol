@@ -24,6 +24,7 @@ service is the federation face. One stub, any engine.
 | package | spec | status |
 |---|---|---|
 | `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — capability inference (`Complete`) + federation status (`Status`) + boundary-signal remediation (`Remediate`) |
+| `zndx.scheduler.v1` | [`specification/protocol/scheduler_grpc.md`](specification/protocol/scheduler_grpc.md) | v1 — federated **scheduler** capability (queues, policy, projection). Lab backend: YuniKorn; not a vendor in the service name |
 | `zndx.verify.v1` | — | RESERVED: verification artifacts on the wire (reasoner certificates, kvasir proof DAGs — the rase_types direction from Gaius) |
 
 ## Operations (identity, secrets, process coordination)
@@ -42,10 +43,10 @@ coordinate multi-engine host work. Adopters must follow:
 
 | project | native service | shared service | gRPC port |
 |---|---|---|---|
-| signals | (core services host) | n/a — Atlas/Ranger/Impala/Kudu | — |
-| aegir | `aegir.engine.AegirEngine` | `zndx.engine.v1.Engine` (from next restart) | :50151 |
-| atelier | `atelier.engine.AtelierEngine` | planned | :50251 |
-| gaius | (see `gaius FEDERATION.md`) | planned | :50051 |
+| signals | `zndx.scheduler.v1.Scheduler` (platform) | `zndx.engine.v1.Engine` | :50551 (lab lattice) |
+| aegir | `aegir.engine.AegirEngine` | `zndx.engine.v1.Engine` | :50151 |
+| atelier | `atelier.engine.AtelierEngine` | `zndx.engine.v1.Engine` | :50251 |
+| gaius | (see `gaius FEDERATION.md`) | `zndx.engine.v1.Engine` | :50051 |
 | hermes-agent | ACP / plugins | planned (client of core + engines) | — |
 
 GPU co-tenancy rides the shared advisory lease dir `/tmp/zndx-gpu-leases` (per-GPU-set
