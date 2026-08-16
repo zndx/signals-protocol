@@ -47,6 +47,32 @@ the engine started). Idempotent: unknown `workload_id` returns `ok=true`,
 Not inference (`Complete`). Not ontology (`Remediate`). Not a Gaius-native
 RPC. Sentinels never dial gRPC.
 
+## Warehouse `tx_id` (UUIDv7)
+
+Data-product `tx_id` / details `t` **MUST** be [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html)
+UUID **version 7**. Implementations **SHOULD** utilize v7 over v1 and v6
+(RFC 9562 §4). Canonical string form is required on the wire.
+
+The Signals warehouse **does not store** a non-v7 id. It raises a boundary
+signal to the **source** engine so that engine remints and resubmits:
+
+| field | value |
+|---|---|
+| `SignalKind` | `TX_ID_NOT_UUIDV7` (5) |
+| `offending` | the rejected `tx_id` |
+| `subject` | `product_id` when known |
+| `authority` | `RFC 9562 §5.7` |
+| `capability` | `reauthor` (or the source's remint capability) |
+
+`Remediate` stays with the **source** (peer). Signals does not invent a
+replacement id for a foreign tx; it refuses the row and surfaces the signal.
+
+Kudu range expiry uses `epoch_hour` (derived from the UUIDv7 timestamp
+when present), week-wide tablets, settle after 4 weeks. `tx_id` is identity
++ datalog order, not the tablet bound.
+
+Peer products on shared RustFS: [`data_products.md`](data_products.md).
+
 ## Status
 
 The federation-facing view: `project` (who answered), per-capability `Endpoint`

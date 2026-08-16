@@ -58,7 +58,9 @@ Neither replaces **MiNiFi C2 + OTel** for agent protocol and activity truth.
            BeginWorkload │             ▼
                          │    ┌────────────────────┐
                          │    │ YuniKorn           │
-                         │    │ queues root.{proj} │
+                         │    │ resource-class     │
+                         │    │ queues (not        │
+                         │    │ root.{project})    │
                          │    │ admits sentinel    │
                          │    │ pods / apps        │
                          │    └────────────────────┘
@@ -80,8 +82,10 @@ Neither replaces **MiNiFi C2 + OTel** for agent protocol and activity truth.
 **Hard rule:** A MiNiFi sentinel **is** the YuniKorn Application (1:1 with a
 schedulable process). YK ends that Application; the Signals C2 server calls
 `zndx.engine.v1.Engine/Yield` over gRPC; the owning engine ends the host
-process. The sentinel is not a second catalog beside Applications. Host
-CUDA stays on the engine unless a later cut puts the work *in* the pod.
+process. The sentinel is not a second catalog beside Applications. The
+Application resource vector is the claim (`federation.zndx.org/gpu` for host
+engine GPU work). CUDA stays on the host engine unless the work is an
+in-cluster GPU pod (`nvidia.com/gpu` **and** the federation token).
 
 ---
 
@@ -106,9 +110,9 @@ Sentinel workloads on RKE2 **must** be deployable as **Knative Services** (or eq
 | Concern | Knative | YuniKorn |
 |---------|---------|----------|
 | Pod count → 0 when idle | **Yes** (KPA + `enable-scale-to-zero`) | No (schedules pods; does not own request-driven scale-to-zero) |
-| Multi-tenant queues / fair-share | Partial (namespace quotas) | **Yes** (hierarchical queues `root.{project}`) |
+| Multi-tenant queues / fair-share | Partial (namespace quotas) | **Yes** (resource-class queues, e.g. `root.internal.inference.extract`) |
 | Cold start of thin agent | Activator + scale-from-zero | Ensures pod can be placed when demand exists |
-| GPU workers | Sentinel is the **claim**; GPU on the pod is a later cut | Host engines hold CUDA today; Yield drops the process |
+| GPU workers | Sentinel is the **claim**; request `federation.zndx.org/gpu` | Host CUDA; in-cluster CUDA also requests `nvidia.com/gpu` |
 
 **Composition (always the target):** YK **places and prioritizes** sentinel pods;
 Knative **creates/removes** them based on activation/idle. Implement against
@@ -259,9 +263,9 @@ not the C2 server and not signals-ui.
 
 | Piece | Mapping |
 |-------|---------|
-| YK **queue** | `root.{project}` |
+| YK **queue** | Resource class (`root.internal.inference.*`, `root.internal.compute`, `root.platform`, `root.external.*`). Project is a label, not the parent. |
 | YK-scheduled pod | Knative-created MiNiFi sentinel pod |
-| Resources | Claim vector of the process (CPU/memory now; GPU claim later) |
+| Resources | Claim vector of the process (cpu/mem + `federation.zndx.org/gpu` when the work is GPU) |
 | Preemption | YK ends the Application → C2 last-gasp → Engine/Yield |
 
 YK and Knative are **co-equal** parts of the K8s target, not progressive
@@ -344,7 +348,7 @@ labels, phase schema, and C2 agent ids as the Knative Service will use.
 |-------|-------------|----------------|
 | **S0** | Spec + `minifi-cpp` / `yunikorn-core` pins; **`zarf/federation`** package skeleton (`signals-federation`, independent of cybersec-dask) | Spec + package tree on trunk; cybersec adopts these standards later |
 | **S1** | MiNiFi **flow + image** oriented to Knative (probe engine Status, OTel phases, C2 heartbeat). May run the **same** binary/flow under a throwaway local process only to debug agent logic | Flow + phase schema freeze; artifact is a **container image** destined for Knative, not a host package product |
-| **S2** | Vendor charts/images into **`signals-federation`** Zarf package; deploy via Zarf (+ converge FSM) on RKE2; first MiNiFi sentinel **Knative Service** on queue `root.{project}` | Package create closed; idle → **0 pods** (KPA); YK shows app/queue |
+| **S2** | Vendor charts/images into **`signals-federation`** Zarf package; deploy via Zarf (+ converge FSM) on RKE2; first MiNiFi sentinel **Knative Service** on a resource-class queue | Package create closed; idle → **0 pods** (KPA); YK shows app/queue |
 | **S3** | C2 DESCRIBE inventory + overwatch against **live** Knative-scaled agents | Multi-project agents visible via C2 while scaled in |
 | **S4** | Gate engine process start on sentinel **YK-admitted + C2 heartbeat**; C2 last-gasp → `Engine/Yield` | No exclusive host work without a YK Application; Yield ends the process |
 | **S5** | Terminal phase → drop activation → Knative zero; orphan timeouts; YK cleanup | No stuck replicas after complete |

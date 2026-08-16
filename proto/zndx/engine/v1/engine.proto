@@ -50,6 +50,7 @@ enum SignalKind {
   UNSATISFIABLE = 2;                // the reasoner entails the artifact can have no instances (disjointness/domain-range)
   UNGROUNDED = 3;                   // no entailed path to a required upper ontology (BFO/CCO)
   VERSION_DRIFT = 4;                // a real-but-SUPERSEDED IRI (legacy → current; e.g. bfo:0000052 → bfo:0000197)
+  TX_ID_NOT_UUIDV7 = 5;             // warehouse tx_id is not RFC 9562 UUID version 7; source remints
 }
 
 // A live entry from the current authority — CONTEXT for the agent to reason over, NOT a mapping to apply.
