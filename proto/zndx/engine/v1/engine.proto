@@ -190,6 +190,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_PEERS = 3;       // configured lattice peers this engine knows
   SERVER_QUERY_KIND_NOTE = 4;        // one FedWiki page by note_id (fork source)
   SERVER_QUERY_KIND_SURFACES = 5;    // advertised primary UIs (this engine)
+  SERVER_QUERY_KIND_QUEUES = 6;      // declared YK leaves this engine needs
 }
 
 message GitRemote {
@@ -234,4 +235,19 @@ message ServerQueryResponse {
   repeated ScheduleHint schedules = 5;
   WikiNote note = 6;
   repeated Surface surfaces = 7;
+  repeated QueueHint queues = 8;      // kind=QUEUES
+}
+
+// A leaf this engine needs Signals to have (YK promote SoR).
+// Empty fields mean "do not invent" — Signals merges additively.
+message QueueHint {
+  string path = 1;                 // root.internal.inference.light
+  string resource_class = 2;       // internal.inference.light
+  int32 gpu_guarantee = 3;
+  int32 gpu_max = 4;
+  int32 max_applications = 5;
+  string preemption_policy = 6;    // default | fence | disabled
+  string preemption_delay = 7;     // Go duration, e.g. 5s
+  string role = 8;                 // light | medium | heavy | offline
+  string examples = 9;
 }

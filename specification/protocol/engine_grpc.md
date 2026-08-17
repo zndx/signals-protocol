@@ -87,6 +87,7 @@ epidemic gossip. Not CZMQ zgossip. Older engines: `UNIMPLEMENTED`.
 | `PEERS` | configured lattice Engine targets |
 | `NOTE` | one FedWiki page (`WikiNote`) |
 | `SURFACES` | this engine's advertised `Surface` list |
+| `QUEUES` | `QueueHint[]` — leaves this engine needs. Signals merges + `PromoteScratch`. Peers never call YK REST. |
 
 Do not invent remotes, peers, or UI URLs. Empty is honest.
 
