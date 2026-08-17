@@ -19,6 +19,8 @@ never addresses a model endpoint.
 | `max_tokens` | generous defaults recommended — reasoning models trace verbosely; `finish_reason: "length"` signals truncation |
 | `temperature` | sampling temperature |
 | `json_schema` | optional JSON Schema (string) → engine-enforced structured output (e.g. vLLM guided-json); empty = unconstrained |
+| `timezone` | optional IANA zone of the *caller* (e.g. `America/Denver`). Empty = unspecified. |
+| `clock_json` | optional JSON Clock (today / tomorrow / `tomorrow_morning` as UTC instants). Empty = none. |
 
 Response: `text` (the answer; reasoning inline when not separated), `model` (what
 actually served), token counts, `latency_ms`, `reasoning_content` (separated
@@ -73,12 +75,30 @@ when present), week-wide tablets, settle after 4 weeks. `tx_id` is identity
 
 Peer products on shared RustFS: [`data_products.md`](data_products.md).
 
+## ServerQuery
+
+Pairwise **server-to-server query** (Matrix Server-Server *Queries*). Not
+epidemic gossip. Not CZMQ zgossip. Older engines: `UNIMPLEMENTED`.
+
+| kind | payload |
+|------|---------|
+| `REMOTES` | named git remotes + advertised `head` |
+| `SCHEDULES` | pg_cron / Airflow hints |
+| `PEERS` | configured lattice Engine targets |
+| `NOTE` | one FedWiki page (`WikiNote`) |
+| `SURFACES` | this engine's advertised `Surface` list |
+
+Do not invent remotes, peers, or UI URLs. Empty is honest.
+
 ## Status
 
-The federation-facing view: `project` (who answered), per-capability `Endpoint`
-(capability, model, healthy, `gpu_ids` — lease visibility for co-tenancy planning),
-`total_gpus`. Engine-private details (internal ports, log paths) are deliberately
-absent.
+The federation-facing view: `project`, per-capability `Endpoint`
+(capability, model, healthy, `gpu_ids`), `total_gpus`, and `surfaces[]`
+(`kind`, `url`, `healthy`). `kind=primary` is the product UI a waffle
+lists. Empty `surfaces` means this engine advertises none. Engine-private
+details (internal vLLM ports, log paths) stay absent.
+
+See [`surfaces.md`](surfaces.md) for the peer implementation note.
 
 ## How the specification is consumed
 

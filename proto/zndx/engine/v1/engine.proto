@@ -41,6 +41,11 @@ service Engine {
   // never call this; they speak MiNiFi C2 HTTP to the C2 server, which is a
   // gRPC client of this RPC.
   rpc Yield(YieldRequest) returns (YieldResponse);
+  // Server-to-server snapshot query (Matrix S2S Queries, not epidemic gossip
+  // and not CZMQ zgossip). Pairwise request/response: remotes, schedules,
+  // known peers, notes, advertised surfaces.
+  // (added 2026-08-16, gaius — additive v1.)
+  rpc ServerQuery(ServerQueryRequest) returns (ServerQueryResponse);
 }
 
 // The KIND of adaptive pressure a boundary detected. Additive-only: new kinds get new numbers.
@@ -114,6 +119,10 @@ message CompleteRequest {
   // guided-json). Empty = unconstrained. Present from v1's birth so federated calls keep schema
   // enforcement across engines.
   string json_schema = 6;
+  // Browser / operator IANA zone (e.g. America/Denver). Empty = unspecified.
+  string timezone = 7;
+  // Optional JSON Clock (today / tomorrow / tomorrow_morning as UTC instants).
+  string clock_json = 8;
 }
 
 message CompleteResponse {
@@ -140,6 +149,14 @@ message StatusResponse {
   string project = 1;             // "aegir" | "atelier" | "gaius" — who answered
   repeated Endpoint endpoints = 2;
   int32 total_gpus = 3;
+  // Product surfaces this engine advertises. Empty = none (honest).
+  repeated Surface surfaces = 4;
+}
+
+message Surface {
+  string kind = 1;
+  string url = 2;
+  bool healthy = 3;
 }
 
 // Why C2 is asking the engine to drop a host process.
@@ -163,4 +180,58 @@ message YieldResponse {
   bool process_ended = 2;
   bool restore_started = 3;  // evict/restore plan if the engine had one
   string message = 4;
+}
+
+// What a ServerQuery asks for. Additive-only.
+enum ServerQueryKind {
+  SERVER_QUERY_KIND_UNSPECIFIED = 0;
+  SERVER_QUERY_KIND_REMOTES = 1;     // named git remotes of this project
+  SERVER_QUERY_KIND_SCHEDULES = 2;   // pg_cron / Airflow catalog hints
+  SERVER_QUERY_KIND_PEERS = 3;       // configured lattice peers this engine knows
+  SERVER_QUERY_KIND_NOTE = 4;        // one FedWiki page by note_id (fork source)
+  SERVER_QUERY_KIND_SURFACES = 5;    // advertised primary UIs (this engine)
+}
+
+message GitRemote {
+  string name = 1;
+  string url = 2;
+}
+
+message PeerHint {
+  string project = 1;
+  string target = 2;    // host:port of the peer's lattice Engine
+}
+
+message ScheduleHint {
+  string id = 1;
+  string cron = 2;
+  string airflow_dag_id = 3;
+  string source = 4;    // pg_cron | airflow
+  bool enabled = 5;
+}
+
+message WikiNote {
+  string id = 1;
+  string title = 2;
+  string body = 3;
+  repeated string links = 4;
+  string origin_project = 5;
+}
+
+message ServerQueryRequest {
+  ServerQueryKind kind = 1;
+  int32 ttl = 2;
+  string nonce = 3;
+  string origin_project = 4;
+  string note_id = 5;
+}
+
+message ServerQueryResponse {
+  string project = 1;
+  repeated GitRemote remotes = 2;
+  string head = 3;
+  repeated PeerHint peers = 4;
+  repeated ScheduleHint schedules = 5;
+  WikiNote note = 6;
+  repeated Surface surfaces = 7;
 }
