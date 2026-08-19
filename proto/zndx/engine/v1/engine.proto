@@ -46,6 +46,10 @@ service Engine {
   // known peers, notes, advertised surfaces.
   // (added 2026-08-16, gaius — additive v1.)
   rpc ServerQuery(ServerQueryRequest) returns (ServerQueryResponse);
+  // Persist a runtime lineage event to the Signals SoR (Atlas OpenLineage).
+  // Producers (Metaflow, Flink, peers) MUST NOT write a private catalog.
+  // (added 2026-08-19, gaius — additive v1.)
+  rpc RecordLineage(LineageRequest) returns (LineageResponse);
 }
 
 // The KIND of adaptive pressure a boundary detected. Additive-only: new kinds get new numbers.
@@ -250,4 +254,16 @@ message QueueHint {
   string preemption_delay = 7;     // Go duration, e.g. 5s
   string role = 8;                 // light | medium | heavy | offline
   string examples = 9;
+}
+
+// OpenLineage 2.0 RunEvent JSON for Signals Atlas SoR (`POST /api/v1/lineage`).
+// (added 2026-08-19, gaius — additive v1.)
+message LineageRequest {
+  string event_json = 1;   // OL RunEvent JSON (eventType START|COMPLETE|FAIL)
+  string event_type = 2;   // START | COMPLETE | FAIL (must match event_json)
+}
+
+message LineageResponse {
+  bool accepted = 1;
+  string error = 2;        // guru when Atlas refuses or is unreachable
 }
