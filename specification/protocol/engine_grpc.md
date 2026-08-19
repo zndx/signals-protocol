@@ -101,6 +101,15 @@ details (internal vLLM ports, log paths) stay absent.
 
 See [`surfaces.md`](surfaces.md) for the peer implementation note.
 
+## RecordLineage
+
+Additive v1. Peers persist OpenLineage `RunEvent` JSON on **Signals Atlas**
+(`POST /api/v1/lineage`). They MUST NOT keep a private lineage catalog.
+
+`LineageRequest.event_json` is the RunEvent. `event_type` must match
+`event_json.eventType` when both are set (`START` | `COMPLETE` | `FAIL`).
+`LineageResponse.accepted` is true only after Atlas accepts the event.
+
 ## How the specification is consumed
 
 **The `.proto` files are the specification** (same stance as
