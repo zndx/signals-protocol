@@ -141,6 +141,25 @@ metadata:
 
 ### 4.3 What drives “idle” for a sentinel Service
 
+**Inactivity, not activity.** KPA scale-to-zero is the idle form of the same
+YuniKorn Application (proxy sentinel). After an **extended inactivity**
+window (stable-window + `scale-to-zero-grace-period`; 30s is a thin-agent
+default, not a 27B vLLM default):
+
+1. KPA takes the last replica to **0** (SIGTERM on the sentinel pod).
+2. MiNiFi **C2 last-gasp** (`phase=preempted` / idle-stop) reaches the
+   **federated engine that owns the vLLM process** (`Engine/Yield`).
+3. That engine stops or checkpoints vLLM. The proxy Application
+   **completes**. `federation.zndx.org/gpu` is released.
+4. Queued work (e.g. 6×1.7B+CLT or 3×SAE) can admit on occupancy leaves.
+
+Knative does **not** stop a host vLLM. The sentinel is the claim; C2 is the
+wire to the engine that owns the process. If the pod hits 0 and the
+Application stays Running, tokens stay claimed.
+
+While **admitted and serving** (`loading` / `running`): `min-scale: "1"`
+(or keep the activate HTTP). Do not STZ a model that is answering.
+
 Knative scales on **request concurrency / RPS** to the Service by default. Federation must **align activation with real work**:
 
 | Pattern | Use |
@@ -223,15 +242,16 @@ Host engines **must not** start exclusive host work for a federated workload unt
 2. C2 has a heartbeat for that `workload_id`, and  
 3. Kerberos ticket available (`secretspec run` → `kinit`) when the work needs it.
 
-YK preemption: last-gasp → C2 → `Engine/Yield` → engine ends the process.
+YK preemption **or** idle STZ: last-gasp → C2 → `Engine/Yield` on the
+federated engine that owns vLLM → process ends → Application completes.
 
 ### 5.4 Scale-to-zero (summary)
 
 | Scale what | Mechanism |
 |------------|-----------|
-| **Sentinel pods** | **Knative KPA** → 0 ([scale-to-zero](https://knative.dev/docs/serving/autoscaling/scale-to-zero/)) when activation ends |
-| **YK queue claim** | App/pod gone → capacity free for other projects |
-| **Host engine** | Optional warm pool; not Knative’s job unless separately managed |
+| **Sentinel pods** | **Knative KPA** → 0 after **extended inactivity** ([scale-to-zero](https://knative.dev/docs/serving/autoscaling/scale-to-zero/)) |
+| **Host vLLM** | **Not** Knative. MiNiFi C2 last-gasp → `Engine/Yield` on the owning federated engine |
+| **YK GPU claim** | Application **complete** after Yield — pod count 0 is not enough |
 
 ---
 
