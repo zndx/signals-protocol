@@ -66,9 +66,42 @@ Roots mirror Aegir lineup:
 | `DiffConfig` | scratch vs current (optional vs live) |
 | `PromoteScratch` | validate → apply (engine-private adapter) → archive previous current → sync |
 | `ListArchives` / `RestoreArchiveToScratch` | freeze catalog / restore |
+| `RequestQueueShare` / `ListQueueShareRequests` | peer WRK occupancy intent over time (recorded; apply is later YK interop) |
 
 Apply is **not** a public backend REST PUT. The engine’s promote adapter owns
 ConfigMap / GitOps / `qmgr` / `scontrol` details.
+
+## Queue share requests (WRK occupancy over time)
+
+`Engine/ServerQuery` `QUEUES` / `QueueHint` is the **declared leaf shape**
+(path, max, default guarantee). It does not say what the peer needs *now*.
+
+YK preemption: a task cannot trigger preemption unless its queue is **under
+its guaranteed capacity**. On a 6-GPU box the floors must move:
+
+| Moment | extract guarantee | light (CLT) guarantee | medium (SAE) |
+|--------|-------------------|----------------------|--------------|
+| article-curate / docling | 1 | 0 or 1 | 0 |
+| more CLT/SAE endpoints | 0 | 1 | 2 |
+
+Peers (`gaius`, …) send `RequestQueueShare` as their WRK mix changes
+(optillm, Metaflow extract, thinking, ask-sae). Signals **records** the
+request (so the lattice can see the time series) and later **applies** a
+config delta. Peers never write queues.yaml or call scheduler-backend REST.
+
+| Field | Role |
+|-------|------|
+| `peer` + `request_id` (uuidv7) | idempotent identity |
+| `valid_from_ns` / `valid_until_ns` | window; 0 until = until superseded |
+| `workloads[].wrk` | host process / flow class (`article-curate`, `optillm`, `thinking`, `ask-sae`, `clt-skos-label`) |
+| `workloads[].queue` | resource-class FQN that WRK will occupy as an Application |
+| `shares[]` | desired `guaranteed` / `max` / `max_applications` per queue |
+
+`ListQueueShareRequests` is the history SoR. States: `RECORDED` →
+`APPLIED` | `SUPERSEDED` | `REJECTED`. Until Signals implements persist,
+the RPC is `UNIMPLEMENTED` (honest; do not invent apply).
+
+Guru when persist fails: `#YK.00000007.SHAREFAIL`.
 
 ## Capability advertising
 

@@ -242,7 +242,8 @@ message ServerQueryResponse {
   repeated QueueHint queues = 8;      // kind=QUEUES
 }
 
-// A leaf this engine needs Signals to have (YK promote SoR).
+// A leaf this engine needs Signals to have (declared *shape*).
+// Time-varying guaranteed capacity is Scheduler/RequestQueueShare.
 // Empty fields mean "do not invent" — Signals merges additively.
 message QueueHint {
   string path = 1;                 // root.internal.inference.light

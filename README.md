@@ -24,7 +24,7 @@ service is the federation face. One stub, any engine.
 | package | spec | status |
 |---|---|---|
 | `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — `Complete` + `Status` + `Remediate` + **`Yield`**; warehouse `tx_id` is RFC 9562 UUIDv7 ([`tx_id.md`](specification/protocol/tx_id.md)); data products on shared RustFS ([`data_products.md`](specification/protocol/data_products.md)) |
-| `zndx.scheduler.v1` | [`specification/protocol/scheduler_grpc.md`](specification/protocol/scheduler_grpc.md) | v1 — federated **scheduler** capability (queues, policy, projection). Lab backend: YuniKorn; not a vendor in the service name |
+| `zndx.scheduler.v1` | [`specification/protocol/scheduler_grpc.md`](specification/protocol/scheduler_grpc.md) | v1 — federated **scheduler** capability (queues, policy, projection, **queue-share requests**). Lab backend: YuniKorn; not a vendor in the service name |
 | `zndx.verify.v1` | — | RESERVED: verification artifacts on the wire (reasoner certificates, kvasir proof DAGs — the rase_types direction from Gaius) |
 
 ## Operations (identity, secrets, process coordination)

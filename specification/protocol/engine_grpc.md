@@ -87,7 +87,7 @@ epidemic gossip. Not CZMQ zgossip. Older engines: `UNIMPLEMENTED`.
 | `PEERS` | configured lattice Engine targets |
 | `NOTE` | one FedWiki page (`WikiNote`) |
 | `SURFACES` | this engine's advertised `Surface` list |
-| `QUEUES` | `QueueHint[]` — leaves this engine needs. Signals merges + `PromoteScratch`. Peers never call YK REST. |
+| `QUEUES` | `QueueHint[]` — **declared leaf shape** (path, max, default guarantee). Time-varying occupancy floors are `zndx.scheduler.v1.Scheduler/RequestQueueShare`, not this snapshot. Peers never call scheduler-backend REST. |
 
 Do not invent remotes, peers, or UI URLs. Empty is honest.
 

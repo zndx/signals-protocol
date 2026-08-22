@@ -51,6 +51,15 @@ service Scheduler {
   rpc PromoteScratch(PromoteScratchRequest) returns (PromoteScratchResponse);
   rpc ListArchives(ListArchivesRequest) returns (ListArchivesResponse);
   rpc RestoreArchiveToScratch(RestoreArchiveToScratchRequest) returns (RestoreArchiveToScratchResponse);
+
+  // ── Queue share (peer occupancy intent over time) ─────────────────────
+  // Peers request guaranteed/max capacity on resource-class leaves as their
+  // WRK mix changes. YK preemption only fires when a queue is *under* its
+  // guarantee; Signals records these requests (this RPC) and later applies
+  // config deltas. Peers NEVER call the scheduler-backend REST.
+  // (added 2026-08-22, gaius — additive v1.)
+  rpc RequestQueueShare(QueueShareRequest) returns (QueueShareResponse);
+  rpc ListQueueShareRequests(ListQueueShareRequestsRequest) returns (ListQueueShareRequestsResponse);
 }
 
 // ── Roots ───────────────────────────────────────────────────────────────
@@ -358,4 +367,71 @@ message RestoreArchiveToScratchRequest {
 message RestoreArchiveToScratchResponse {
   bool ok = 1;
   string message = 2;
+}
+
+// ── Queue share (WRK → leaf occupancy over time) ────────────────────────
+//
+// QueueHint on Engine/ServerQuery is the *declared leaf shape* (max, default
+// guarantee). These messages are the *time series of requested deltas*:
+// Gaius may need extract guarantee=1 while article-curate runs, then 0 so
+// light/CLT or medium/SAE can raise their floor on a 6-GPU box.
+// A task cannot trigger preemption unless its queue is under guarantee
+// (YuniKorn preemption design). Signals is the SoR for that config.
+
+enum QueueShareState {
+  QUEUE_SHARE_STATE_UNSPECIFIED = 0;
+  QUEUE_SHARE_RECORDED = 1;    // persisted; not yet applied to the backend
+  QUEUE_SHARE_SUPERSEDED = 2;  // a later request from the same peer+queue
+  QUEUE_SHARE_APPLIED = 3;     // backend config matches (Signals YK interop)
+  QUEUE_SHARE_REJECTED = 4;    // recorded but cannot apply (over parent max)
+}
+
+// Host process / flow class that will occupy a queue as an Application.
+message WorkloadIntent {
+  string wrk = 1;             // article-curate | optillm | thinking | ask-sae | clt-skos-label
+  string queue = 2;           // FQN, e.g. root.internal.inference.extract
+  string resource_class = 3;  // internal.inference.extract
+  int32 applications = 4;     // Applications this WRK will hold (≥1)
+}
+
+message QueueShare {
+  string queue = 1;                 // FQN
+  ResourceMap guaranteed = 2;       // backend keys; GPU token = federation.zndx.org/gpu
+  ResourceMap max = 3;
+  int32 max_applications = 4;
+}
+
+message QueueShareRequest {
+  string peer = 1;                  // gaius | aegir | atelier
+  string request_id = 2;            // uuidv7; idempotent
+  int64 valid_from_ns = 3;          // unix ns; 0 = now
+  int64 valid_until_ns = 4;         // 0 = until superseded
+  string reason = 5;                // human: "article_curate extract floor for preemption"
+  string supersedes_request_id = 6; // optional prior request_id
+  repeated WorkloadIntent workloads = 7;
+  repeated QueueShare shares = 8;   // one per queue this request touches
+}
+
+message QueueShareResponse {
+  bool accepted = 1;                // recorded (apply may be later)
+  string request_id = 2;
+  QueueShareState state = 3;
+  string error = 4;                 // guru when Signals cannot persist
+}
+
+message ListQueueShareRequestsRequest {
+  string peer = 1;                  // empty = all peers
+  string queue = 2;                 // empty = all queues
+  int64 since_ns = 3;               // 0 = unbounded
+  int32 limit = 4;                  // 0 = backend default
+}
+
+message QueueShareRecord {
+  QueueShareRequest request = 1;
+  int64 recorded_at_ns = 2;
+  QueueShareState state = 3;
+}
+
+message ListQueueShareRequestsResponse {
+  repeated QueueShareRecord records = 1;
 }
