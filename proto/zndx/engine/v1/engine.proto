@@ -195,6 +195,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_NOTE = 4;        // one FedWiki page by note_id (fork source)
   SERVER_QUERY_KIND_SURFACES = 5;    // advertised primary UIs (this engine)
   SERVER_QUERY_KIND_QUEUES = 6;      // declared YK leaves this engine needs
+  SERVER_QUERY_KIND_WORKLOADS = 7;   // WRK model + capabilities + tp/pp (not queue names)
 }
 
 message GitRemote {
@@ -240,6 +241,19 @@ message ServerQueryResponse {
   WikiNote note = 6;
   repeated Surface surfaces = 7;
   repeated QueueHint queues = 8;      // kind=QUEUES
+  repeated WorkloadHint workloads = 9;  // kind=WORKLOADS
+}
+
+// WRK shape for occupancy. Queue names stay resource-class FQNs
+// (heavy/medium/light/extract/compute). Model, capabilities, and
+// tensor/pipeline parallel live here. Pick the leaf from gpu_tokens.
+message WorkloadHint {
+  string wrk = 1;                    // thinking | optillm | ask-sae | article-curate
+  string model = 2;                  // HF id or "proxy"
+  repeated string capabilities = 3;  // thinking | complete | extract | ...
+  int32 tensor_parallel = 4;
+  int32 pipeline_parallel = 5;
+  int32 gpu_tokens = 6;              // tp*pp (or 0 for CPU proxy)
 }
 
 // A leaf this engine needs Signals to have (declared *shape*).

@@ -91,7 +91,7 @@ config delta. Peers never write queues.yaml or call scheduler-backend REST.
 
 | Field | Role |
 |-------|------|
-| `peer` + `request_id` (uuidv7) | idempotent identity |
+| `peer` + `request_id` | **RFC 9562 UUIDv7 required** on every request (never omit, never v4) |
 | `valid_from_ns` / `valid_until_ns` | window; 0 until = until superseded |
 | `workloads[].wrk` | host process / flow class (`article-curate`, `optillm`, `thinking`, `ask-sae`, `clt-skos-label`) |
 | `workloads[].queue` | resource-class FQN that WRK will occupy as an Application |
