@@ -134,6 +134,12 @@ message CompleteRequest {
   // OpenAI tool_choice: "auto" | "required" | "none", or a named-tool JSON
   // object. Empty defaults to "auto" whenever tools_json is set.
   string tool_choice = 10;
+  // Full OpenAI messages[] as a JSON array, replacing prompt/system_prompt
+  // for message construction. A multi-turn tool loop MUST use this: flattening
+  // assistant tool_calls and tool results into one prompt string loses the
+  // pairing the chat template needs, and the model re-issues calls it has
+  // already made. Empty keeps the prompt/system_prompt pair.
+  string messages_json = 11;
 }
 
 message CompleteResponse {
