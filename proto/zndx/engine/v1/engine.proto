@@ -127,6 +127,13 @@ message CompleteRequest {
   string timezone = 7;
   // Optional JSON Clock (today / tomorrow / tomorrow_morning as UTC instants).
   string clock_json = 8;
+  // OpenAI tools[] as a JSON array. Empty = no tools (text-only Complete).
+  // When set, the engine forwards them to the local OpenAI-compatible
+  // backend so the capability emits native tool_calls instead of prose.
+  string tools_json = 9;
+  // OpenAI tool_choice: "auto" | "required" | "none", or a named-tool JSON
+  // object. Empty defaults to "auto" whenever tools_json is set.
+  string tool_choice = 10;
 }
 
 message CompleteResponse {
