@@ -26,6 +26,11 @@
 syntax = "proto3";
 package zndx.scheduler.v1;
 
+// WorkloadRequirement lives in the engine surface (peers advertise it via
+// Engine/ServerQuery kind=WORKLOADS); admission carries the same requirements
+// so the Signals engine sizes YuniKorn queues from what workloads actually need.
+import "zndx/engine/v1/engine.proto";
+
 service Scheduler {
   // ── Runtime (backend-private; product clients stay on this service) ──
   rpc ListPartitions(ListPartitionsRequest) returns (ListPartitionsResponse);
@@ -388,10 +393,16 @@ enum QueueShareState {
 
 // Host process / flow class that will occupy a queue as an Application.
 message WorkloadIntent {
+  reserved 3;  // was `string resource_class`; promoted to zndx.engine.v1.ResourceClass at field 7
   string wrk = 1;             // article-curate | optillm | thinking | ask-sae | clt-skos-label
-  string queue = 2;           // FQN, e.g. root.internal.inference.extract
-  string resource_class = 3;  // internal.inference.extract
+  string queue = 2;           // occupancy FQN the caller chose (heavy/medium/light)
   int32 applications = 4;     // Applications this WRK will hold (≥1)
+  // What the WRK wants (capabilities) and physically needs (typed packing) — the
+  // same requirements peers advertise via Engine/ServerQuery kind=WORKLOADS. The
+  // Signals engine reads these to reconcile YuniKorn queue guarantees/maximums.
+  repeated string capabilities = 5;  // thinking | complete | clt | sae | …
+  zndx.engine.v1.WorkloadRequirements requirements = 6;  // typed: backend/parallelism/footprint/kserve
+  zndx.engine.v1.ResourceClass resource_class = 7;  // occupancy class (what it needs)
 }
 
 message QueueShare {
