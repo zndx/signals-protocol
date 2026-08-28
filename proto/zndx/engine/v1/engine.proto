@@ -209,6 +209,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_SURFACES = 5;    // advertised primary UIs (this engine)
   SERVER_QUERY_KIND_QUEUES = 6;      // declared YK leaves this engine needs
   SERVER_QUERY_KIND_WORKLOADS = 7;   // WRK model + capabilities + tp/pp (not queue names)
+  SERVER_QUERY_KIND_SOURCE_POSTURE = 8;  // what code the peer is actually running (SourcePosture)
 }
 
 message GitRemote {
@@ -237,6 +238,46 @@ message WikiNote {
   string origin_project = 5;
 }
 
+// ── Source posture: what code a peer is actually running ───────────────────
+// Answered for kind=SOURCE_POSTURE. Every field is best-effort and honest:
+// absent/zero means "not reported", so a light peer (e.g. Metabase) can adopt
+// incrementally and be skipped until it does — same graceful path as REMOTES.
+
+// One submodule's posture. pinned_sha is the superproject gitlink (what the
+// parent commit references); checked_out_sha is what is on disk. They diverge
+// when the submodule is moved off its pin.
+message SubmodulePosture {
+  string path = 1;             // submodule path within the superproject
+  string name = 2;             // configured submodule name
+  string pinned_sha = 3;       // superproject gitlink (git ls-tree HEAD <path>)
+  string checked_out_sha = 4;  // commit actually checked out on disk
+  bool dirty = 5;              // submodule working tree has uncommitted changes
+}
+
+// Migration backlog for one source; a peer may report several (dbmate, alembic…).
+message MigrationPosture {
+  string source = 1;           // "dbmate" | "alembic" | "flyway" | ...
+  string current = 2;          // latest applied migration id (empty if none)
+  repeated string unapplied = 3; // migration ids present but not applied
+}
+
+// A peer's source posture — what code the live engine is actually running,
+// distinct from the checkout tip. head is read live; running_sha is stamped once
+// at engine start, so a long-lived process reveals when the tree moved under it.
+message SourcePosture {
+  string project = 1;          // who this posture is for
+  string checkout = 2;         // host-local checkout path (may be empty; honest)
+  string branch = 3;           // current branch, empty if detached
+  string head = 4;             // checkout tip (git rev-parse HEAD)
+  string running_sha = 5;      // commit the LIVE process started from
+  bool dirty = 6;              // superproject working tree has uncommitted changes
+  string upstream = 7;         // tracking ref, e.g. "origin/trunk"; empty if none
+  int32 ahead = 8;             // commits ahead of upstream
+  int32 behind = 9;            // commits behind upstream
+  repeated SubmodulePosture submodules = 10;
+  repeated MigrationPosture migrations = 11;
+}
+
 message ServerQueryRequest {
   ServerQueryKind kind = 1;
   int32 ttl = 2;
@@ -255,6 +296,7 @@ message ServerQueryResponse {
   repeated Surface surfaces = 7;
   repeated QueueHint queues = 8;      // kind=QUEUES
   repeated WorkloadOffer workloads = 9;  // kind=WORKLOADS
+  SourcePosture posture = 10;         // kind=SOURCE_POSTURE
 }
 
 // ── Workload requirements: typed model (vLLM · KServe · YuniKorn targets) ──
