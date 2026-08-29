@@ -142,6 +142,15 @@ message CompleteRequest {
   string messages_json = 11;
 }
 
+// One structured tool call the ENGINE parsed from the model's output — so a
+// client never parses <tool_call> markup itself (Engine-First). Populated whether
+// the backend used a native tool parser or the engine extracted the markup.
+message ToolCall {
+  string id = 1;              // provider call id; empty if the backend gave none
+  string name = 2;            // tool name (e.g. "gaius__fmp_search")
+  string arguments_json = 3;  // arguments as a JSON object, serialized to a string
+}
+
 message CompleteResponse {
   string text = 1;                // the answer; reasoning inline here when not separated
   string model = 2;               // the model the engine actually served the capability with
@@ -150,6 +159,9 @@ message CompleteResponse {
   float latency_ms = 5;
   string reasoning_content = 6;   // separated chain-of-thought when available; empty otherwise
   string finish_reason = 7;       // "stop" (complete) vs "length" (truncated — raise max_tokens)
+  // Structured tool calls the engine parsed. Clients consume these directly;
+  // during the cutover `text` may also still carry the <tool_call> markup.
+  repeated ToolCall tool_calls = 8;
 }
 
 message StatusRequest {}
