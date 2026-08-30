@@ -50,6 +50,17 @@ service Engine {
   // Producers (Metaflow, Flink, peers) MUST NOT write a private catalog.
   // (added 2026-08-19, gaius — additive v1.)
   rpc RecordLineage(LineageRequest) returns (LineageResponse);
+  // Held-open stream of this engine's INTENDED workload profile — what it MEANS to
+  // be serving right now, with each intent's ACTUAL status alongside. The engine
+  // emits the current SETTLED profile immediately, re-emits phase=TRANSITIONING
+  // just before it changes the serving set (evict/admit/restore), then a new
+  // SETTLED profile once the change lands, plus a periodic heartbeat. An out-of-band
+  // watchdog compares desired-vs-actual ONLY while SETTLED (and past each intent's
+  // warmup) so a changeover never reads as failure, and recycles the unit — which
+  // the engine cannot do to itself — on a sustained settled mismatch. There is
+  // ALWAYS a profile while the engine is alive (empty intents = intentionally
+  // serving nothing). (added 2026-08-30, gaius — additive v1.)
+  rpc WatchWorkload(WatchWorkloadRequest) returns (stream WorkloadProfile);
 }
 
 // The KIND of adaptive pressure a boundary detected. Additive-only: new kinds get new numbers.
@@ -408,4 +419,51 @@ message LineageRequest {
 message LineageResponse {
   bool accepted = 1;
   string error = 2;        // guru when Atlas refuses or is unreachable
+}
+
+// ── Intended workload profile stream (WatchWorkload) ──────────────────────────
+// The engine's live desired-vs-actual serving set, so an out-of-band watchdog can
+// verify without racing changeovers. (added 2026-08-30, gaius — additive v1.)
+
+message WatchWorkloadRequest {}
+
+// Whether the intended set is stable enough to verify.
+enum WorkloadPhase {
+  WORKLOAD_PHASE_UNSPECIFIED = 0;
+  WORKLOAD_PHASE_SETTLED = 1;        // intended set is stable — safe to verify now
+  WORKLOAD_PHASE_TRANSITIONING = 2;  // a changeover is imminent/in progress — HOLD
+}
+
+// The ACTUAL state of one intended endpoint, as the engine observes it. Distinct
+// from the ProcessStatus enum so the wire contract stays stable if internals move.
+enum WorkloadStatus {
+  WORKLOAD_STATUS_UNSPECIFIED = 0;
+  WORKLOAD_STATUS_SERVING  = 1;  // up and answering (the only non-mismatch state)
+  WORKLOAD_STATUS_STARTING = 2;  // admitted/loading — within warmup, not yet a miss
+  WORKLOAD_STATUS_DEGRADED = 3;  // up but not fully healthy
+  WORKLOAD_STATUS_FAILED   = 4;  // intended up, but load/serve failed
+  WORKLOAD_STATUS_ABSENT   = 5;  // intended up, but no process exists at all
+}
+
+// One capability the engine INTENDS to be serving in this profile, with its
+// actual status. Absence from the profile means "not intended" (e.g. thinking
+// while evicted for a render) — never a failure.
+message WorkloadIntent {
+  string capability = 1;         // thinking | ask-sae | embedding | render | ...
+  string alias = 2;              // deployment alias (thinking, ask-agent, ...)
+  string model = 3;              // model it intends to serve with
+  int32 port = 4;                // local serving port (0 = not port-served)
+  repeated int32 gpu_ids = 5;    // GPUs it pins
+  ServingBackend backend = 6;    // vllm_local | cpu_proxy | kserve_remote
+  int32 warmup_seconds = 7;      // grace after settle before actual != SERVING = a miss
+  WorkloadStatus actual = 8;     // what the engine observes right now
+}
+
+// The engine's intended workload profile at a moment. Always present while alive.
+message WorkloadProfile {
+  WorkloadPhase phase = 1;
+  uint64 generation = 2;          // monotonic; advances on every settled changeover
+  repeated WorkloadIntent intents = 3;
+  int64 settled_at_unix_ms = 4;   // when this profile settled (warmup math)
+  string detail = 5;              // human note: what triggered the change
 }
