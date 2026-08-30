@@ -151,6 +151,15 @@ message CompleteRequest {
   // pairing the chat template needs, and the model re-issues calls it has
   // already made. Empty keeps the prompt/system_prompt pair.
   string messages_json = 11;
+  // A capability SET the engine must satisfy TOGETHER: at most ONE method
+  // capability (an optillm technique class, e.g. "cot_reasoning") plus at
+  // most ONE model capability (e.g. "thinking"). The engine plans the
+  // fulfilment (method → technique, model → served endpoint) or fails fast
+  // with FAILED_PRECONDITION #EP.00000020.NOMIX listing the offered
+  // models × methods. Empty = the legacy single `capability` field.
+  // Vocabulary: specification/protocol/capabilities.md.
+  // (added 2026-08-30, gaius — additive v1.)
+  repeated string capabilities = 12;
 }
 
 // One structured tool call the ENGINE parsed from the model's output — so a
@@ -160,6 +169,18 @@ message ToolCall {
   string id = 1;              // provider call id; empty if the backend gave none
   string name = 2;            // tool name (e.g. "gaius__fmp_search")
   string arguments_json = 3;  // arguments as a JSON object, serialized to a string
+}
+
+// One reasoning layer a fulfilment produced: the model's native separated
+// chain-of-thought (layer="model") and/or the method's scaffold — e.g.
+// cot_reflection's <thinking>/<reflection> block (layer="method"). Reasoning
+// traces are corpus value-adds in this federation: retained, never dropped.
+// (added 2026-08-30, gaius — additive v1.)
+message ReasoningLayer {
+  string layer = 1;     // "model" | "method"
+  string producer = 2;  // e.g. "Qwen/Qwen3.8-27B" or "cot_reflection@engine"
+  string text = 3;      // the verbatim trace
+  int32 tokens = 4;     // best-effort share of completion tokens; 0 = unknown (honest)
 }
 
 message CompleteResponse {
@@ -173,6 +194,14 @@ message CompleteResponse {
   // Structured tool calls the engine parsed. Clients consume these directly;
   // during the cutover `text` may also still carry the <tool_call> markup.
   repeated ToolCall tool_calls = 8;
+  // Every reasoning layer the fulfilment produced, in order (model layer
+  // first when present). Populated on capabilities[] requests.
+  // (added 2026-08-30, gaius — additive v1.)
+  repeated ReasoningLayer reasoning = 9;
+  // How the engine fulfilled the request, e.g.
+  // "cot_reflection@engine/Qwen3.8-27B@vllm:8081". Empty on the legacy path.
+  // (added 2026-08-30, gaius — additive v1.)
+  string fulfilled_by = 10;
 }
 
 message StatusRequest {}
@@ -414,6 +443,11 @@ message WorkloadOffer {
   WorkloadRequirements requirements = 4;    // typed physical/packing needs
   ResourceClass resource_class = 5;         // occupancy class (what it needs)
   string queue = 6;                         // optional FQN hint
+  // METHOD capabilities (optillm technique classes) this peer can serve in a
+  // Complete capabilities[] conjunction, e.g. cot_reflection, bon. A federated
+  // planner checks the models × methods mix before routing. Empty list is
+  // honest. (added 2026-08-30, gaius — additive v1.)
+  repeated string methods = 7;
 }
 
 // A leaf this engine needs Signals to have (declared *shape*).

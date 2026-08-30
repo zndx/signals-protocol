@@ -21,11 +21,18 @@ never addresses a model endpoint.
 | `json_schema` | optional JSON Schema (string) → engine-enforced structured output (e.g. vLLM guided-json); empty = unconstrained |
 | `timezone` | optional IANA zone of the *caller* (e.g. `America/Denver`). Empty = unspecified. |
 | `clock_json` | optional JSON Clock (today / tomorrow / `tomorrow_morning` as UTC instants). Empty = none. |
+| `capabilities` | a capability SET the engine must satisfy TOGETHER: ≤1 **method** capability (an optillm technique class, e.g. `cot_reasoning`) + ≤1 **model** capability (e.g. `thinking`). Unsatisfiable mix → FAILED_PRECONDITION `#EP.00000020.NOMIX` listing offered models × methods. Empty = the legacy single `capability`. Vocabulary: [capabilities.md](capabilities.md). (added 2026-08-30) |
 
 Response: `text` (the answer; reasoning inline when not separated), `model` (what
 actually served), token counts, `latency_ms`, `reasoning_content` (separated
 chain-of-thought when the model/parser splits it — retained, never dropped: thinking
 traces are corpus value-adds in this federation), `finish_reason` (`stop` | `length`).
+On `capabilities[]` requests, additionally `reasoning[]` — every reasoning layer the
+fulfilment produced, each a `ReasoningLayer{layer: model|method, producer, text,
+tokens}` (model layer first when present) — and `fulfilled_by` (e.g.
+`cot_reflection@engine/Qwen3.8-27B@vllm:8081`). A method that cannot recover the
+model layer keeps the method layer and the serving engine logs
+`#EP.00000021.METHODTRACE`. (added 2026-08-30)
 
 Errors surface as gRPC status codes; the engine stays up (INTERNAL for serving
 failures, UNAVAILABLE while a capability is cold-loading if the engine chooses not to
