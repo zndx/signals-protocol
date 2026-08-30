@@ -118,3 +118,25 @@ the agent **observes**.
 Reference implementation: Signals product `signals.metaflow.snapshots`
 and `signals.ops.history` / `signals.ops.metaflow_store` in
 [weathership/signals](https://github.com/weathership/signals).
+
+## Discovery over the wire (additive, 2026-08-30)
+
+`ServerQuery(kind=PRODUCTS)` returns `repeated ProductHint products` — the
+products a peer **publishes**, with the Iceberg `table_identifier` in the
+shared Polaris catalog, the `data_uri` on the Signals object plane, the
+producing `flow`/`step`, and how `history` is retained. This is discovery
+only: the warehouse (`details` / `tx` / `hx_reasoning`) remains the
+inventory of record and the agent still observes there. A hint lets any
+engine find and read a product (with full Iceberg snapshot history) without
+first reading Signals. Empty list is honest.
+
+Flow-/step-scoped products (e.g. Gaius `gaius.curation.cot_reasoning`, the
+chain-of-thought traces of `ArticleCurationFlow.select_article`) keep the
+flow/step/subject **as columns** of one physical table
+(`hx.cot_reasoning`), partitioned by flow and month — so one product carries
+every subject and every run, and the path
+`{subject}/{step}/hx/{table}` is a projection, never a namespace.
+
+Reference implementation: Gaius `gaius.curation.cot_reasoning`
+(`src/gaius/hx/cot_reasoning.py`, `src/gaius/flows/article_curation/publish.py`,
+`src/gaius/engine/s2s.py::declared_products`).

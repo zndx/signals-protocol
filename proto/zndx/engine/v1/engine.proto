@@ -233,6 +233,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_QUEUES = 6;      // declared YK leaves this engine needs
   SERVER_QUERY_KIND_WORKLOADS = 7;   // WRK model + capabilities + tp/pp (not queue names)
   SERVER_QUERY_KIND_SOURCE_POSTURE = 8;  // what code the peer is actually running (SourcePosture)
+  SERVER_QUERY_KIND_PRODUCTS = 9;        // federated data products this peer publishes (ProductHint)
 }
 
 message GitRemote {
@@ -320,6 +321,27 @@ message ServerQueryResponse {
   repeated QueueHint queues = 8;      // kind=QUEUES
   repeated WorkloadOffer workloads = 9;  // kind=WORKLOADS
   SourcePosture posture = 10;         // kind=SOURCE_POSTURE
+  repeated ProductHint products = 11; // kind=PRODUCTS
+}
+
+// One federated data product a peer publishes — DISCOVERY only. The Signals
+// warehouse (details / tx / hx_reasoning, see specification/protocol/
+// data_products.md) stays the inventory of record; this lets any engine find a
+// product and its Iceberg table in the shared Polaris catalog without first
+// reading Signals. Additive; empty list is honest.
+// (added 2026-08-30, gaius — additive v1.)
+message ProductHint {
+  string product_id = 1;        // {peer}.{domain}.{name}, e.g. gaius.curation.cot_reasoning
+  string peer = 2;              // publishing engine
+  string title = 3;
+  string kind = 4;              // corpus | reasoning | snapshots | embeddings | ...
+  string leaf = 5;              // YK resource-class queue the producing flow runs on
+  string table_identifier = 6;  // Iceberg identifier in the shared Polaris catalog (e.g. hx.cot_reasoning); "" = object-only
+  string data_uri = 7;          // object location on the Signals object plane (RustFS)
+  string flow = 8;              // producing Metaflow flow, e.g. ArticleCurationFlow
+  string step = 9;              // producing step, e.g. select_article ("" = whole flow)
+  string agent_focus = 10;      // what a reviewing agent should assess
+  string history = 11;          // how history is retained, e.g. "iceberg-snapshots+run-qualified-details"
 }
 
 // ── Workload requirements: typed model (vLLM · KServe · YuniKorn targets) ──
