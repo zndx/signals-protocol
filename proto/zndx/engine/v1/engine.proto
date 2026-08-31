@@ -263,7 +263,8 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_WORKLOADS = 7;   // WRK model + capabilities + tp/pp (not queue names)
   SERVER_QUERY_KIND_SOURCE_POSTURE = 8;  // what code the peer is actually running (SourcePosture)
   SERVER_QUERY_KIND_PRODUCTS = 9;        // federated data products this peer publishes
-  SERVER_QUERY_KIND_COGNITION = 10;      // a peer's cognition overview (thought/cycle buckets) (ProductHint)
+  SERVER_QUERY_KIND_COGNITION = 10;      // a peer's cognition overview (thought/cycle buckets)
+  SERVER_QUERY_KIND_CONTRIBUTIONS = 11;  // a peer's contributions by source and workflow (ProductHint)
 }
 
 message GitRemote {
@@ -353,6 +354,7 @@ message ServerQueryResponse {
   SourcePosture posture = 10;         // kind=SOURCE_POSTURE
   repeated ProductHint products = 11; // kind=PRODUCTS
   CognitionHint cognition = 12;       // kind=COGNITION (added 2026-08-31, gaius — additive v1.)
+  ContributionsHint contributions = 13; // kind=CONTRIBUTIONS (added 2026-08-31, gaius — additive v1.)
 }
 
 // A peer's cognition OVERVIEW — discovery only, at a serving-engine-chosen
@@ -384,6 +386,29 @@ message CognitionHint {
   int64 range_end_ms = 9;
   repeated CognitionActivityBucket buckets = 10;
   repeated CognitionStreamHint streams = 11;
+}
+
+// A peer's contributions by source and workflow — DISCOVERY overview from
+// that peer's systems of record (e.g. gaius.activity / gaius.openlineage
+// today; Atlas+OpenLineage, Metaflow, and Airflow from core Signals are
+// PENDING — each system of record answers as it becomes able; an unset
+// hint or absent system is honest, never an error). Serving engine picks
+// the window (~30d). (added 2026-08-31, gaius — additive v1.)
+message ContributionItem {
+  string group = 1;   // "source" | "workflow"
+  string id = 2;      // e.g. arxiv_cs_dc | article_curation
+  string system = 3;  // system of record, e.g. gaius.openlineage
+  int32 total = 4;
+  repeated int32 series = 5; // aligned to hint buckets, zero-filled
+}
+
+message ContributionsHint {
+  string project = 1;
+  string interval = 2;        // bucket unit served (hour|6h|day|week|month)
+  int64 range_start_ms = 3;
+  int64 range_end_ms = 4;
+  repeated CognitionActivityBucket buckets = 5; // bounds only (counts unused)
+  repeated ContributionItem items = 6;
 }
 
 // One federated data product a peer publishes — DISCOVERY only. The Signals
