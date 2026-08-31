@@ -262,7 +262,8 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_QUEUES = 6;      // declared YK leaves this engine needs
   SERVER_QUERY_KIND_WORKLOADS = 7;   // WRK model + capabilities + tp/pp (not queue names)
   SERVER_QUERY_KIND_SOURCE_POSTURE = 8;  // what code the peer is actually running (SourcePosture)
-  SERVER_QUERY_KIND_PRODUCTS = 9;        // federated data products this peer publishes (ProductHint)
+  SERVER_QUERY_KIND_PRODUCTS = 9;        // federated data products this peer publishes
+  SERVER_QUERY_KIND_COGNITION = 10;      // a peer's cognition overview (thought/cycle buckets) (ProductHint)
 }
 
 message GitRemote {
@@ -351,6 +352,38 @@ message ServerQueryResponse {
   repeated WorkloadOffer workloads = 9;  // kind=WORKLOADS
   SourcePosture posture = 10;         // kind=SOURCE_POSTURE
   repeated ProductHint products = 11; // kind=PRODUCTS
+  CognitionHint cognition = 12;       // kind=COGNITION (added 2026-08-31, gaius — additive v1.)
+}
+
+// A peer's cognition OVERVIEW — discovery only, at a serving-engine-chosen
+// window (~30d): running state, thought/cycle totals, coarse activity
+// buckets, and stream mix. The peer's own UI is the deep surface. A peer
+// without a cognition unit leaves the hint unset — honest, never an error.
+// (added 2026-08-31, gaius — additive v1.)
+message CognitionActivityBucket {
+  int64 start_ms = 1;   // half-open [start_ms, end_ms)
+  int64 end_ms = 2;
+  int32 thoughts = 3;
+  int32 cycles = 4;
+}
+
+message CognitionStreamHint {
+  string id = 1;        // thought stream (type), e.g. pattern | curiosity
+  int32 thoughts = 2;
+}
+
+message CognitionHint {
+  string project = 1;
+  string unit = 2;               // e.g. "cognition"
+  bool running = 3;
+  int32 thoughts = 4;            // window total
+  int32 cycles = 5;
+  int64 last_cycle_ms = 6;
+  string interval = 7;           // bucket unit served (hour|6h|day|week|month)
+  int64 range_start_ms = 8;
+  int64 range_end_ms = 9;
+  repeated CognitionActivityBucket buckets = 10;
+  repeated CognitionStreamHint streams = 11;
 }
 
 // One federated data product a peer publishes — DISCOVERY only. The Signals
