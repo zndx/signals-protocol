@@ -84,6 +84,13 @@ message Observation {
   SourceKind source = 1;
   string locator = 2;                 // unit name | flow_id | jobname | task_type | URL
   int32 poll_seconds = 3;             // 0 = event-driven / streamed
+  // OBSERVE THROUGH ENGINES: when the source lives on another host (or is owned
+  // by another project), it is read via the owning engine's zndx.engine.v1 face
+  // — `via` names a Process in this instance whose observation is ENGINE_GRPC.
+  // Nautilus never opens a foreign store's own port: one protocol port per host
+  // is the only thing a distributed deployment can promise. Empty = local read.
+  // (added 2026-09-03 — additive v1.)
+  string via = 4;
 }
 
 // When a process is expected to run, and the GENEROUS outer net past which a

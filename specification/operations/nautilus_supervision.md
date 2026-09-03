@@ -87,6 +87,24 @@ nothing outside the phase may resolve them. The gate's own verdict is then a cla
 stops "file downloaded" being penalized for a vLLM failure three phases later, while
 still letting the terminal surface verdict resolve the terminal gate's claim.
 
+**Observe through engines.** A source that lives on another host or belongs to
+another project — a peer's Metaflow store, the central Airflow metadata, a foreign
+pg_cron — is read **via the owning engine's `zndx.engine.v1` face**
+(`Observation.via` names the engine process), never by opening the store's own port
+from across a host boundary. Truly distributed deployments can promise one
+protocol port per host and nothing more; the supervisor is designed to that
+promise from day one. Engines answer observation reads deterministically
+(`ServerQuery`-class hints), so this adds no reasoning to the supervisor's path.
+
+**Sentinels stay; sensors complement them.** The MiNiFi sentinel pattern
+(`minifi_sentinels.md`) is the proven representation of host work inside the
+cluster — the YuniKorn claim, the C2 channel, OTel as activity truth. Adopting a
+central scheduler (Airflow) reinforces that pattern rather than replacing it:
+DAG tasks are admitted through the same queues, sensors wait on the facts
+sentinels already emit, and asset events carry data-product lineage. Nautilus
+observes both — sentinel claims and scheduler state — through the same engine
+faces.
+
 **Positions are reported, not scraped, at gate boundaries.** A process with
 `reports_positions=true` MUST call `ReportPosition` on each phase transition. A
 process that declares it and never reports is `UNSUPERVISED` — surfaced loudly, never
