@@ -25,6 +25,7 @@ service is the federation face. One stub, any engine.
 |---|---|---|
 | `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — `Complete` + `Status` + `Remediate` + **`Yield`**; warehouse `tx_id` is RFC 9562 UUIDv7 ([`tx_id.md`](specification/protocol/tx_id.md)); data products on shared RustFS ([`data_products.md`](specification/protocol/data_products.md)) |
 | `zndx.scheduler.v1` | [`specification/protocol/scheduler_grpc.md`](specification/protocol/scheduler_grpc.md) | v1 — federated **scheduler** capability (queues, policy, projection, **queue-share requests**). Lab backend: YuniKorn; not a vendor in the service name |
+| `zndx.supervision.v1` | [`specification/operations/nautilus_supervision.md`](specification/operations/nautilus_supervision.md) | v1 — the **supervision grammar**: supervision tree, state machines with phase gates and horizons, objectives on the final surfaced result, the position vocabulary engines report and the ledger stamps, and the **Nautilus** supervisor service. Grammar here; a project ships an *instance* (no project is named in the protocol) |
 | `zndx.verify.v1` | — | RESERVED: verification artifacts on the wire (reasoner certificates, kvasir proof DAGs — the rase_types direction from Gaius) |
 
 ## Operations (identity, secrets, process coordination)
@@ -36,6 +37,7 @@ coordinate multi-engine host work. Adopters must follow:
 |---|---|
 | [`specification/operations/kerberos_and_secretspec.md`](specification/operations/kerberos_and_secretspec.md) | **Binding** Kerberos principal catalog, SecretSpec allowlists, `kinit` process wrappers, Ranger onboarding |
 | [`specification/operations/minifi_sentinels.md`](specification/operations/minifi_sentinels.md) | **Binding design** — MiNiFi C++ sentinels (C2 + OTel); **Knative Serving** scale-to-zero + **YuniKorn** admission on RKE2 |
+| [`specification/operations/nautilus_supervision.md`](specification/operations/nautilus_supervision.md) | **Binding design** — **Nautilus**, the deterministic external supervisor (Erlang-style tree, phase gates, Brier-scored ledger, write-ahead bookkeeping); **Overwatch** stays engine-native reasoning. Each project ships a `zndx.supervision.v1` instance |
 
 **Reference implementation:** [weathership/signals](https://github.com/weathership/signals) is the first federation project on Kerberos + SecretSpec, and vendors **MiNiFi C++** (`components/minifi-cpp`) and **YuniKorn core** (`components/yunikorn-core`) for sentinel coordination. Sibling engines should implement these procedures—do not invent a parallel long-term identity or process-control path.
 

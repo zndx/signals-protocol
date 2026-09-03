@@ -1,0 +1,331 @@
+// zndx.supervision.v1 — the SHARED supervision grammar for the signals federation.
+//
+// WHY (audited 2026-09-02, gaius): the per-project stacks are assembled ad hoc from
+// Metaflow flows, Airflow DAGs, pg_cron jobs, in-engine daemons, vLLM endpoints and
+// systemd units — with NO declared source of truth for what the stack is, what phase
+// any workflow is in, or what "healthy" means for the whole. Supervision was split
+// between an in-engine watcher (state lost on every restart, scoring the process it
+// lives in) and out-of-process shell scripts whose verdicts and recycles were written
+// to flat files nothing else could read. Probe efficacy scoring (Brier) therefore ran
+// on positions nobody stamped and resolved forecasts by proposition text alone.
+//
+// This package declares the grammar an EXTERNAL, DETERMINISTIC supervisor (Nautilus,
+// an Erlang-style supervisor carried into every federated project) consumes:
+//   * a supervision TREE — processes, kinds, restart strategies, dependencies;
+//   * state MACHINES over those processes — phases, gate boundaries, horizons;
+//   * OBJECTIVES defined on the final surfaced result, with explicit gates;
+//   * the POSITION vocabulary engines and flows report against the loaded spec, which
+//     is also the ledger's stamping vocabulary (one declaration, three consumers).
+//
+// Design rules:
+//   * grammar here, instances elsewhere — a project ships an INSTANCE (textproto) of
+//     Supervisor conforming to this schema; the protocol never names a project, a
+//     flow, or a rubric. Anything Nautilus must INTERPRET is promoted to a generic
+//     kind first; everything else rides opaque `attrs` stamped into evidence;
+//   * deterministic supervisor, reasoning engine — Nautilus never hosts an agent.
+//     Judgment (Overwatch: ACP + an independent model) lives IN the engine and is
+//     reached through Escalation; Nautilus records the outcome like any other forecast;
+//   * supervisor state never lives in the supervised tree — bookkeeping targets the
+//     project's postgres through a local write-ahead buffer, so recording never blocks
+//     on a stack that may be the thing that is down;
+//   * every side-effecting verdict is a forecast — a recycle, a reset, a hold — stamped
+//     with the position it was rendered at, resolved within its phase horizon;
+//   * additive-only within v1 — new fields get new numbers, nothing is renamed.
+//
+// Seeded by zndx.engine.v1's WatchWorkload vocabulary (WorkloadProfile: intents,
+// SETTLED/TRANSITIONING phases, warmup grace) — the first declared intent the
+// federation had. This package generalizes "intended serving set" to "intended stack".
+
+syntax = "proto3";
+package zndx.supervision.v1;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Supervision tree
+// ─────────────────────────────────────────────────────────────────────────────
+
+// What kind of thing a supervised process is. Kinds are GENERIC: a project says
+// "this is a Metaflow flow", never "this is the prospects flow" (that is the id).
+enum ProcessKind {
+  PROCESS_KIND_UNSPECIFIED = 0;
+  PROCESS_KIND_SYSTEMD_UNIT = 1;      // a host unit (the engine unit, watchdog units)
+  PROCESS_KIND_ENGINE_DAEMON = 2;     // an in-engine daemon (registry name)
+  PROCESS_KIND_SERVING_ENDPOINT = 3;  // a model endpoint (WorkloadIntent alias)
+  PROCESS_KIND_SCHEDULED_TASK = 4;    // a task class claimed from a task queue
+  PROCESS_KIND_METAFLOW_FLOW = 5;     // a Metaflow flow (runs/steps in its store)
+  PROCESS_KIND_AIRFLOW_DAG = 6;       // an Airflow DAG (metadata DB)
+  PROCESS_KIND_PG_CRON_JOB = 7;       // a pg_cron job (job_run_details)
+  PROCESS_KIND_EXTERNAL_SERVICE = 8;  // a dependency the stack needs but does not own
+}
+
+// Where Nautilus OBSERVES a process from. One adapter per kind inside Nautilus;
+// an instance only names the kind and a locator. No project code in the supervisor.
+enum SourceKind {
+  SOURCE_KIND_UNSPECIFIED = 0;
+  SOURCE_KIND_ENGINE_GRPC = 1;        // zndx.engine.v1 Status / WatchWorkload
+  SOURCE_KIND_METAFLOW_STORE = 2;     // runs_v3 / steps_v3 (locator = flow_id)
+  SOURCE_KIND_AIRFLOW_METADATA = 3;   // dag_run / task_instance (locator = dag_id)
+  SOURCE_KIND_PG_CRON = 4;            // cron.job_run_details (locator = jobname)
+  SOURCE_KIND_SYSTEMD = 5;            // unit active state (locator = unit name)
+  SOURCE_KIND_TASK_QUEUE = 6;         // scheduled_tasks rows (locator = task_type)
+  SOURCE_KIND_HTTP_PROBE = 7;         // a GET that must answer (locator = URL)
+  SOURCE_KIND_REPORTED = 8;           // positions the process reports itself
+}
+
+// Erlang restart strategies, applied by the PARENT to its children.
+enum RestartStrategy {
+  RESTART_STRATEGY_UNSPECIFIED = 0;
+  RESTART_STRATEGY_ONE_FOR_ONE = 1;   // restart only the failed child
+  RESTART_STRATEGY_ONE_FOR_ALL = 2;   // restart all children
+  RESTART_STRATEGY_REST_FOR_ONE = 3;  // restart the failed child and those after it
+  RESTART_STRATEGY_NONE = 4;          // observe and score only — never actuate
+}
+
+message Observation {
+  SourceKind source = 1;
+  string locator = 2;                 // unit name | flow_id | jobname | task_type | URL
+  int32 poll_seconds = 3;             // 0 = event-driven / streamed
+}
+
+// When a process is expected to run, and the GENEROUS outer net past which a
+// silent one is a miss. Nets are nets, not deadlines: a process showing progress is
+// never killed by the supervisor on wall-clock alone.
+message Cadence {
+  string cron = 1;                    // 5-field cron in the project's local time
+  int32 expected_period_seconds = 2;  // for non-cron processes (poll loops, daemons)
+  int32 net_seconds = 3;              // outer net past expected completion
+}
+
+message Process {
+  string id = 1;                      // unique within the instance
+  ProcessKind kind = 2;
+  string parent = 3;                  // parent process id ("" = root)
+  RestartStrategy restart = 4;        // how THIS process supervises its children
+  Observation observation = 5;
+  int32 warmup_seconds = 6;           // grace after (re)start before absence = a miss
+  Cadence cadence = 7;
+  repeated string depends_on = 8;     // process ids that must be serving first
+  bool reports_positions = 9;         // MUST call Nautilus.ReportPosition at gates
+  map<string, string> attrs = 10;     // opaque; stamped into evidence, never read
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State machines: phases, gates, horizons
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Predicate kinds a gate may use. Generic; parameters ride `params`.
+enum GateKind {
+  GATE_KIND_UNSPECIFIED = 0;
+  GATE_KIND_FLOW_REACHED_STEP = 1;    // params: step
+  GATE_KIND_FOOTPRINT_ADVANCED = 2;   // params: sql (count query), min
+  GATE_KIND_FRESHNESS_WITHIN = 3;     // params: sql (max timestamp), within_seconds
+  GATE_KIND_SURFACE_WELLFORMED = 4;   // params: glob, section, min_chars, ...
+  GATE_KIND_JUDGE_RUBRIC = 5;         // params: rubric (text), sample_max — Overwatch's call
+  GATE_KIND_PROBE_PASS = 6;           // params: probe (observer name that must pass)
+  GATE_KIND_POSITION_REPORTED = 7;    // the process reported reaching this phase
+}
+
+// Who anchors an outcome. Gold = outside the trust boundary (human, or Overwatch's
+// independent model checking the PUBLIC result); silver = the supervisor's own
+// deterministic verification. Internal machinery confirming internal machinery is
+// silver at best, however confident.
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  TIER_GOLD = 1;
+  TIER_SILVER = 2;
+}
+
+message Gate {
+  string name = 1;
+  GateKind kind = 2;
+  map<string, string> params = 3;     // EXPLICIT criteria — a gate without a
+                                      // concrete threshold is not a gate
+  bool judge_final_call = 4;          // Overwatch renders the verdict (JUDGE_RUBRIC)
+  Tier tier = 5;                      // tier of the resolution this gate anchors
+  string rationale = 6;               // why this threshold (kept beside the number)
+}
+
+// The resolution horizon for forecasts made inside a phase: how long an open
+// forecast waits for its gate, and whether it may be resolved by anything OUTSIDE
+// its own phase. `resolve_within_phase_only=true` is the phase-gate rule that stops
+// a "file downloaded" forecast being Brier-penalized for an unrelated downstream
+// failure — a forecast answers to ITS segment's gate, and the gate itself becomes
+// a claim the next phase resolves (a hierarchy, not a flat window).
+message Horizon {
+  int32 window_seconds = 1;
+  bool resolve_within_phase_only = 2;
+}
+
+message Phase {
+  string id = 1;
+  int32 order = 2;                    // ascending; phases are a total order in v1
+  repeated string steps = 3;          // source step/task names this phase spans
+  Gate gate = 4;                      // the boundary predicate that CLOSES the phase
+  Horizon horizon = 5;                // horizon for forecasts stamped in this phase
+}
+
+message Machine {
+  string id = 1;
+  string process = 2;                 // owning process id (a flow, a task class)
+  repeated Phase phases = 3;
+  Horizon default_horizon = 4;
+  string surfaced_result = 5;         // what the USER receives when the machine ends
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Objectives: defined on the final surfaced result
+// ─────────────────────────────────────────────────────────────────────────────
+
+// An Objective is what the schedule PROMISED the user: it is verified on the artifact
+// the user opens, against explicit criteria. Every intermediate check is a forecast
+// that the user receives it. Mechanics and intent objectives are paired by convention
+// (cards flow / the RIGHT cards flow).
+message Objective {
+  string name = 1;
+  string surfaced_result = 2;         // the page, brief, or answer the user receives
+  repeated string machines = 3;       // machine ids this objective closes
+  repeated Gate gates = 4;            // surface gates; ALL must pass
+  string cadence_cron = 5;            // how often it is verified
+  Horizon horizon = 6;                // upstream resolution horizon
+  repeated string resolves = 7;       // TRANSITIONAL: proposition LIKE-patterns; use
+                                      // phase-scoped resolution once positions flow
+  map<string, string> attrs = 8;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Budgets and epoch
+// ─────────────────────────────────────────────────────────────────────────────
+
+message Budgets {
+  int32 recycle_k = 1;                // recycles per window before the breaker trips
+  int32 recycle_window_seconds = 2;
+  int32 recycle_cooldown_seconds = 3;
+  int32 judge_consults_per_day = 4;   // trigger-driven Overwatch consultations
+  int32 rubric_judgments_per_day = 5; // objective final calls
+}
+
+// The complete supervision instance for one project's stack.
+message Supervisor {
+  string project = 1;                 // "gaius" | "signals" | ... — instance identity
+  string spec_version = 2;            // instance version (semver or date)
+  string engine_build = 3;            // the supervised engine's build id; with
+                                      // spec_version this is the SCORING EPOCH —
+                                      // pinned here so a source commit that changes
+                                      // nothing about the stack does not reset scores
+  repeated Process processes = 4;
+  repeated Machine machines = 5;
+  repeated Objective objectives = 6;
+  Budgets budgets = 7;
+  string engine_grpc = 8;             // host:port of the supervised zndx.engine.v1
+  map<string, string> attrs = 9;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wire: positions, status, escalation
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PositionSource {
+  POSITION_SOURCE_UNSPECIFIED = 0;
+  POSITION_SOURCE_REPORTED = 1;       // the process itself, at a gate boundary
+  POSITION_SOURCE_OBSERVED = 2;       // a Nautilus adapter read it from a store
+  POSITION_SOURCE_INFERRED = 3;       // derived (e.g. lifecycle from timestamps)
+}
+
+// A logical position in the supervised FSM. This is the ledger's stamping
+// vocabulary: every forecast carries the position it was rendered at, and phase
+// gates resolve forecasts BY position, not by proposition text.
+message Position {
+  string process = 1;                 // Process.id
+  string machine = 2;                 // Machine.id ("" = no machine)
+  string phase = 3;                   // Phase.id
+  string run_id = 4;                  // run / task / dag_run identity
+  string step = 5;                    // source step name
+  int64 momentum = 6;                 // per-scope corroboration count (raw; bucketed at read)
+  PositionSource source = 7;
+  int64 at_unix_ms = 8;
+  string epoch = 9;                   // spec_version+engine_build at stamping
+}
+
+message PositionReport {
+  Position position = 1;
+  string detail = 2;                  // human note
+}
+
+message Ack {
+  bool accepted = 1;
+  string note = 2;                    // why not (unknown process/phase = loud reject)
+}
+
+message HeartbeatRequest {
+  string process = 1;
+  int64 at_unix_ms = 2;
+}
+
+message StatusRequest {}
+
+enum ProcessHealth {
+  PROCESS_HEALTH_UNSPECIFIED = 0;
+  PROCESS_HEALTH_SERVING = 1;
+  PROCESS_HEALTH_STARTING = 2;        // within warmup
+  PROCESS_HEALTH_MISSING = 3;         // past warmup, not observed
+  PROCESS_HEALTH_STALLED = 4;         // observed, no progress past its net
+  PROCESS_HEALTH_UNSUPERVISED = 5;    // reports_positions but never reported — LOUD
+}
+
+message ProcessStatus {
+  string process = 1;
+  ProcessHealth health = 2;
+  Position last_position = 3;
+  int64 last_seen_unix_ms = 4;
+  string detail = 5;
+}
+
+message ArmedTrigger {
+  string trigger = 1;                 // serving_desync | kill_loop | objective_stale | ...
+  string scope = 2;
+  string signature = 3;               // COARSE arming signature — never free text
+  int64 armed_unix_ms = 4;
+}
+
+message SupervisorStatus {
+  string project = 1;
+  string epoch = 2;
+  int64 spec_loaded_unix_ms = 3;
+  repeated ProcessStatus processes = 4;
+  repeated ArmedTrigger armed = 5;
+  int32 recycles_in_window = 6;
+  bool breaker_tripped = 7;
+  int64 buffered_records = 8;         // write-ahead rows not yet in postgres
+}
+
+message WatchEscalationsRequest {}
+
+// Nautilus → engine. The supervisor detected what determinism cannot settle and asks
+// the engine's Overwatch capability to reason about it. The engine answers by
+// recording a judge forecast in the ledger; Nautilus scores it like any other.
+message Escalation {
+  string trigger = 1;
+  string scope = 2;
+  string detail = 3;
+  Position position = 4;
+  string snapshot_markdown = 5;       // deterministic snapshot for the judge
+  int64 at_unix_ms = 6;
+}
+
+message LoadSpecRequest {
+  bytes supervisor = 1;               // serialized Supervisor (binary or textproto)
+  bool textproto = 2;
+}
+
+// The supervisor's face. Engines and flows are CLIENTS of Nautilus for reporting;
+// Nautilus is a client of the engine's zndx.engine.v1 for observation and Overwatch.
+service Nautilus {
+  // A process reports reaching a gate boundary. Unknown process/phase is rejected
+  // loudly (Ack.accepted=false) — an unsupervised report is a spec bug, not noise.
+  rpc ReportPosition(PositionReport) returns (Ack);
+  rpc Heartbeat(HeartbeatRequest) returns (Ack);
+  rpc Status(StatusRequest) returns (SupervisorStatus);
+  // The engine subscribes; each Escalation is handed to its Overwatch capability.
+  rpc WatchEscalations(WatchEscalationsRequest) returns (stream Escalation);
+  // Operator: load or replace the instance. Validation failures are rejected whole.
+  rpc LoadSpec(LoadSpecRequest) returns (Ack);
+}
