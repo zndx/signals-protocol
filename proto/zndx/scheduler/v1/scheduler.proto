@@ -389,6 +389,11 @@ enum QueueShareState {
   QUEUE_SHARE_SUPERSEDED = 2;  // a later request from the same peer+queue
   QUEUE_SHARE_APPLIED = 3;     // backend config matches (Signals YK interop)
   QUEUE_SHARE_REJECTED = 4;    // recorded but cannot apply (over parent max)
+  // The applier has taken this record's batch and the backend apply is in
+  // flight. A peer waiting for APPLIED treats this as PROGRESS (reset its
+  // patience), not as "still RECORDED": the apply is variable-latency and a
+  // fixed deadline mistook a slow apply for a stalled one (2026-09-04).
+  QUEUE_SHARE_APPLYING = 5;
 }
 
 // Host process / flow class that will occupy a queue as an Application.
@@ -441,6 +446,12 @@ message QueueShareRecord {
   QueueShareRequest request = 1;
   int64 recorded_at_ns = 2;
   QueueShareState state = 3;
+  // Apply outcome, so peers can score the arbiter: when the backend config
+  // matched, how long the apply took, and the last apply error if the
+  // record fell back from APPLYING to RECORDED.
+  int64 applied_at_ns = 4;          // 0 until APPLIED
+  int32 apply_ms = 5;               // wall time of the successful apply batch
+  string apply_error = 6;           // last failure while APPLYING (empty when none)
 }
 
 message ListQueueShareRequestsResponse {
