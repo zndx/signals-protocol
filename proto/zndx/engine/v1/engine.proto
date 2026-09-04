@@ -61,6 +61,13 @@ service Engine {
   // ALWAYS a profile while the engine is alive (empty intents = intentionally
   // serving nothing). (added 2026-08-30, gaius — additive v1.)
   rpc WatchWorkload(WatchWorkloadRequest) returns (stream WorkloadProfile);
+  // Join the federation directory: the caller asks THIS engine to remember a
+  // PeerHint (lattice Engine host:port) until ttl_seconds elapses. Launchers
+  // stay pull-only (ServerQuery PEERS, then Status.surfaces). This is the
+  // Matrix-style join — not gossip, not a peer-contract edit. Engines that
+  // are not a directory answer UNIMPLEMENTED (honest).
+  // (added 2026-09-04, aegir — additive v1.)
+  rpc Announce(PeerAnnounce) returns (AnnounceAck);
 }
 
 // The KIND of adaptive pressure a boundary detected. Additive-only: new kinds get new numbers.
@@ -256,7 +263,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_UNSPECIFIED = 0;
   SERVER_QUERY_KIND_REMOTES = 1;     // named git remotes of this project
   SERVER_QUERY_KIND_SCHEDULES = 2;   // pg_cron / Airflow catalog hints
-  SERVER_QUERY_KIND_PEERS = 3;       // configured lattice peers this engine knows
+  SERVER_QUERY_KIND_PEERS = 3;       // configured lattice + live Announce'd peers
   SERVER_QUERY_KIND_NOTE = 4;        // one FedWiki page by note_id (fork source)
   SERVER_QUERY_KIND_SURFACES = 5;    // advertised primary UIs (this engine)
   SERVER_QUERY_KIND_QUEUES = 6;      // declared YK leaves this engine needs
@@ -580,4 +587,21 @@ message WorkloadProfile {
   repeated WorkloadIntent intents = 3;
   int64 settled_at_unix_ms = 4;   // when this profile settled (warmup math)
   string detail = 5;              // human note: what triggered the change
+}
+
+// A peer asking to be remembered in the callee's PEERS set.
+// engine_target is the lattice gRPC host:port — never a UI URL.
+// surfaces[] is advisory; the directory Status's engine_target for the waffle.
+// (added 2026-09-04, aegir — additive v1.)
+message PeerAnnounce {
+  string project = 1;            // hermes | metabase | …
+  string engine_target = 2;      // host:port of the announcer's Engine
+  repeated Surface surfaces = 3; // optional; Status remains authoritative
+  int32 ttl_seconds = 4;         // 0 = directory default; directory may clamp
+}
+
+message AnnounceAck {
+  bool accepted = 1;
+  int32 ttl_seconds = 2;  // TTL the directory will actually keep
+  string error = 3;       // guru when refused; empty on accept
 }

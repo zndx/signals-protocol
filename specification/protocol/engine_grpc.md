@@ -91,7 +91,7 @@ epidemic gossip. Not CZMQ zgossip. Older engines: `UNIMPLEMENTED`.
 |------|---------|
 | `REMOTES` | named git remotes + advertised `head` |
 | `SCHEDULES` | pg_cron / Airflow hints |
-| `PEERS` | configured lattice Engine targets |
+| `PEERS` | configured lattice Engine targets **plus** live `Announce`d peers (TTL’d) |
 | `NOTE` | one FedWiki page (`WikiNote`) |
 | `SURFACES` | this engine's advertised `Surface` list |
 | `QUEUES` | `QueueHint[]` — **declared leaf shape** (path, max, default guarantee). Time-varying occupancy floors are `zndx.scheduler.v1.Scheduler/RequestQueueShare`, not this snapshot. Peers never call scheduler-backend REST. |
@@ -108,6 +108,32 @@ lists. Empty `surfaces` means this engine advertises none. Engine-private
 details (internal vLLM ports, log paths) stay absent.
 
 See [`surfaces.md`](surfaces.md) for the peer implementation note.
+
+## Announce
+
+Additive v1. A joining engine **pushes** a `PeerHint` to a directory engine
+(typically the hub, or any peer that implements the RPC). Launchers stay
+pull-only: they never call `Announce`; they `ServerQuery PEERS` and
+`Status` those targets.
+
+| field | semantics |
+|---|---|
+| `project` | `Status.project` of the announcer (`hermes`, `metabase`, …) |
+| `engine_target` | lattice Engine `host:port` — never a UI URL, never invented |
+| `surfaces[]` | advisory copy of `Status.surfaces`; the directory still `Status`s `engine_target` for the waffle |
+| `ttl_seconds` | how long to keep the hint; `0` = directory default. Directory may clamp. |
+
+`AnnounceAck.accepted` is true only when the directory recorded the hint.
+`ttl_seconds` on the ack is the TTL it will actually keep. `error` is a
+guru string when refused (empty project/target, self-announce, …).
+
+Engines that are not a directory return `UNIMPLEMENTED` — honest, not a
+fault. The announcer heartbeats before expiry; a later `Status` miss on
+the target drops it from the waffle even if the TTL has not elapsed.
+
+Do not persist `Announce` into Atlas or any other lineage store. The
+roster is process-local and TTL’d. Re-announce after the directory
+restarts.
 
 ## RecordLineage
 
