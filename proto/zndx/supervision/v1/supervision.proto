@@ -832,3 +832,83 @@ service EngineSupervision {
   // is dark — a stale last_tick is the honest signal).
   rpc Backlog(BacklogRequest) returns (BacklogResponse);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The supervisor's own records (added 2026-09-04 — additive v1)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Nautilus writes its records FIRST to a write-ahead journal (an object-store
+// log) as protobuf, then drains them into the project's tiered store. These
+// are the record shapes; one topic partition per record kind.
+
+message BacklogCell {
+  string project = 1;
+  string workflow = 2;                // Process.id
+  string item_key = 3;                // stable (class, failure mode)
+  ExpectationCategory category = 4;
+  int32 slot = 5;                     // 0..9
+  BacklogState state = 6;
+  int64 at_unix_ms = 7;               // when the cell was filled
+  int64 first_miss_unix_ms = 8;
+  int32 horizon_slot = 9;
+  int64 horizon_unix_ms = 10;
+  int32 escalation_level = 11;
+  bool resolved = 12;
+  string evidence_json = 13;
+  string spec_version = 14;
+  string engine_build = 15;
+}
+
+message SupervisorEvent {
+  string project = 1;
+  string event_id = 2;                // uuidv7
+  string kind = 3;                    // trigger_firing | directive | directive_result | forecast |
+                                      // resolution | escalation | budget_exhausted | stream | unsupervised
+  string trigger = 4;
+  string scope = 5;
+  string signature = 6;
+  string observer = 7;
+  string call_site = 8;
+  string proposition = 9;
+  Verdict verdict = 10;
+  float p = 11;
+  string side_effect = 12;
+  string task_class = 13;
+  int64 task_id = 14;
+  Position position = 15;
+  string directive_id = 16;
+  string forecast_id = 17;
+  bool outcome_known = 18;
+  bool outcome = 19;
+  Tier tier = 20;
+  string detail = 21;
+  string evidence_json = 22;
+  int64 at_unix_ms = 23;
+  string spec_version = 24;
+  string engine_build = 25;
+}
+
+message PositionRecord {
+  string project = 1;
+  string process = 2;
+  string kind = 3;                    // heartbeat | position | health
+  string machine = 4;
+  string phase = 5;
+  string run_id = 6;
+  string step = 7;
+  int64 momentum = 8;
+  PositionSource source = 9;
+  ProcessHealth health = 10;
+  int32 silence_s = 11;
+  string detail = 12;
+  int64 at_unix_ms = 13;
+}
+
+message SupervisorRecord {
+  string project = 1;
+  oneof record {
+    BacklogCell backlog_cell = 10;
+    SupervisorEvent event = 11;
+    PositionRecord position = 12;
+  }
+}
