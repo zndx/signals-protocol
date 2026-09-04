@@ -413,9 +413,11 @@ message WorkloadIntent {
   // the arbiter must hold for this WRK; the footprint stays what is RESIDENT.
   // Before this field the two were conflated (guaranteed = tokens at admit),
   // so a probe's occupancy was protected against the run that needed the GPU.
-  // -1 = unset (legacy: footprint/guaranteed decides). PRIORITY orders victims
-  // within a leaf; the peer stamps it on the sentinel, the arbiter records it.
-  int32 floor = 8;
+  // `optional` so PRESENCE is explicit: an absent floor is a legacy intent
+  // (footprint/guaranteed decides); a present 0 is a DECLARED "fully
+  // preemptible". PRIORITY orders victims within a leaf (0 = unspecified);
+  // the peer stamps it on the sentinel, the arbiter records it.
+  optional int32 floor = 8;
   int32 priority = 9;
 }
 
