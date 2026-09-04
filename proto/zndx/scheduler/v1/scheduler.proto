@@ -419,6 +419,17 @@ message WorkloadIntent {
   // the peer stamps it on the sentinel, the arbiter records it.
   optional int32 floor = 8;
   int32 priority = 9;
+  // Who declared this intent: the run / process that emitted it (a workload id
+  // such as `ambient-synthesis-28633`, or a standing process id), empty for
+  // the workload's own admission claim. Identity for implicit supersession is
+  // (peer, queue, wrk, owner): a declarer re-stating its intent for a workload
+  // on a leaf replaces its own prior record; intents from DIFFERENT declarers
+  // for the same shared workload (e.g. `embedding` held for an admit flow AND
+  // for an ambient run) coexist and merge (max per leaf). Before this field,
+  // supersession was keyed by (peer, queue) and any later request on a leaf
+  // retired every other live intent on it (2026-09-04: a probe's floor-0
+  // request superseded a running flow's floor-1 embedding intent).
+  string owner = 10;
 }
 
 message QueueShare {
