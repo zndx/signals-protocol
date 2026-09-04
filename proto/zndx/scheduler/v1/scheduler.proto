@@ -408,6 +408,15 @@ message WorkloadIntent {
   repeated string capabilities = 5;  // thinking | complete | clt | sae | …
   zndx.engine.v1.WorkloadRequirements requirements = 6;  // typed: backend/parallelism/footprint/kserve
   zndx.engine.v1.ResourceClass resource_class = 7;  // occupancy class (what it needs)
+  // Declared intent (zndx.supervision.v1.ResourceIntent, emitted per phase):
+  // FLOOR is the non-preemptible part of the footprint — the guaranteed tokens
+  // the arbiter must hold for this WRK; the footprint stays what is RESIDENT.
+  // Before this field the two were conflated (guaranteed = tokens at admit),
+  // so a probe's occupancy was protected against the run that needed the GPU.
+  // -1 = unset (legacy: footprint/guaranteed decides). PRIORITY orders victims
+  // within a leaf; the peer stamps it on the sentinel, the arbiter records it.
+  int32 floor = 8;
+  int32 priority = 9;
 }
 
 message QueueShare {

@@ -112,6 +112,47 @@ inferred around. Adapters (`SourceKind`) fill in what stores can show (Metaflow 
 Airflow task instances, pg_cron runs) as `OBSERVED` positions; `INFERRED` positions are
 derived (lifecycle from timestamps) and carry the least weight.
 
+## 4b. Resource intents: what a phase occupies and what it must not lose
+
+GPU capacity is a small integer of scheduler tokens (six on a 6-GPU host), and
+contention for the leftover tokens between federated workloads is **intentional**:
+it is what makes the architecture prove itself. The grammar therefore treats the
+outcome of contention as a declared decision, not the arbiter's coin toss.
+
+A `ResourceIntent` (on a `Phase`, or on a long-lived `Process` as a standing
+intent) separates three numbers that admission-time protocols conflated:
+
+- **occupancy** — tokens resident while the intent holds;
+- **floor** — the guaranteed, non-preemptible part (≤ occupancy; `0` = fully
+  preemptible). A resident GPU worker with floor 0 is a legitimate victim;
+- **priority** — victim ordering within a leaf; higher survives preemption.
+
+Emission is Nautilus's job, because Nautilus holds the position: the intent is
+emitted on phase entry and a zero floor on phase exit — ahead of the claim, not at
+the instant the token is already needed. The arbiter (the federation's scheduler,
+Signals in this deployment) merges floors per leaf by maximum and records the
+declared priority; the peer stamps the priority on its sentinel so scheduler
+preemption evicts the low-priority holder. The wire form is
+`zndx.scheduler.v1.WorkloadIntent.floor/priority`; a legacy intent without a floor
+keeps its footprint-derived protection until it migrates.
+
+Every emission is a forecast — `share APPLIED within N seconds` — resolved by the
+arbiter's own record (`QueueShareRecord.applied_at_ns/apply_ms`), and
+`GATE_KIND_SHARE_APPLIED` lets a phase gate on the arbiter having honoured its
+floors. The arbiter is Brier-scored like every other observer; sustained divergence
+between declared floors and applied config is an objective failure, not a warning
+line. The worked example on the 6-GPU host: thinking holds a standing 4/4; a
+prospects run declares extract 1/1 and protects embedding (light 1/1, priority
+above the CLT probe's standing light 1/0); the probe yields for the run's duration
+and resumes — a deferral on record, which is a result, not a failure.
+
+Consensus among Nautilus instances is not a decision protocol. The arbiter is
+single and authoritative; what the instances agree on is the vocabulary (this
+grammar) and the arbitration policy (floors by declared priority, ties by
+horizon), and each verifies the outcome in its own ledger. Agreement on rules with
+independent verification of results degrades gracefully: a dark arbiter turns
+every peer's forecasts inconclusive at once, which is itself the signal.
+
 ## 5. Objectives on the final surfaced result
 
 An `Objective` names the artifact the user receives (`surfaced_result`) and the gates

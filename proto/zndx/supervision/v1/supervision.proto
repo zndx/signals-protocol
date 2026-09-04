@@ -113,6 +113,10 @@ message Process {
   repeated string depends_on = 8;     // process ids that must be serving first
   bool reports_positions = 9;         // MUST call Nautilus.ReportPosition at gates
   map<string, string> attrs = 10;     // opaque; stamped into evidence, never read
+  // Standing occupancy of a long-lived process (a served model, a resident
+  // worker): held for the process's whole life, not per phase. A standing
+  // intent with floor 0 is a resident GPU consumer that phases may preempt.
+  repeated ResourceIntent resources = 11;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +133,8 @@ enum GateKind {
   GATE_KIND_JUDGE_RUBRIC = 5;         // params: rubric (text), sample_max — Overwatch's call
   GATE_KIND_PROBE_PASS = 6;           // params: probe (observer name that must pass)
   GATE_KIND_POSITION_REPORTED = 7;    // the process reported reaching this phase
+  GATE_KIND_SHARE_APPLIED = 8;        // params: leaf, within_seconds — the arbiter
+                                      // applied this phase's declared floors
 }
 
 // Who anchors an outcome. Gold = outside the trust boundary (human, or Overwatch's
@@ -162,12 +168,40 @@ message Horizon {
   bool resolve_within_phase_only = 2;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Resource intents: what a phase (or a standing process) occupies, and what
+// it must not lose
+// ──────────────────────────────────────────────────────────────────────────
+
+// GPU tokens are counts the scheduler hands out; a whole box is a small
+// integer of them (six on tinybox) and contention for the leftover ones is
+// intentional. An intent separates OCCUPANCY (tokens resident) from the FLOOR
+// (the non-preemptible part) and adds PRIORITY (victim ordering within a leaf)
+// so the outcome of contention is a DECLARED decision rather than the
+// arbiter's coin toss. Nautilus emits the intent on phase entry and a zero
+// floor on exit — ahead of the claim, not at the instant the token is needed;
+// the arbiter (the federation's scheduler, Signals) merges floors per leaf
+// (max), and priority rides the sentinel pod so preemption evicts the
+// low-priority holder. Every emission is a forecast ("share APPLIED within N
+// seconds") resolved by the arbiter's own record — the arbiter is scored.
+// (added 2026-09-04 — additive v1.)
+message ResourceIntent {
+  string leaf = 1;                    // queue FQN, e.g. root.internal.inference.light
+  string workload = 2;                // wrk/kind that carries the claim ("prospects-update", "embedding")
+  int32 occupancy = 3;                // GPU tokens resident while the intent holds
+  int32 floor = 4;                    // guaranteed tokens, <= occupancy; 0 = fully preemptible
+  int32 priority = 5;                 // victim ordering within the leaf; higher survives preemption
+  int32 applications = 6;             // Applications held on the leaf (0 = 1)
+  string rationale = 7;               // why this floor / priority (kept beside the numbers)
+}
+
 message Phase {
   string id = 1;
   int32 order = 2;                    // ascending; phases are a total order in v1
   repeated string steps = 3;          // source step/task names this phase spans
   Gate gate = 4;                      // the boundary predicate that CLOSES the phase
   Horizon horizon = 5;                // horizon for forecasts stamped in this phase
+  repeated ResourceIntent resources = 6;  // what this phase occupies / protects
 }
 
 message Machine {
