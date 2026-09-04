@@ -15,7 +15,10 @@
 //   * state MACHINES over those processes — phases, gate boundaries, horizons;
 //   * OBJECTIVES defined on the final surfaced result, with explicit gates;
 //   * the POSITION vocabulary engines and flows report against the loaded spec, which
-//     is also the ledger's stamping vocabulary (one declaration, three consumers).
+//     is also the ledger's stamping vocabulary (one declaration, three consumers);
+//   * EXPECTATIONS — the Operations Backlog's hour-scale contract per workflow
+//     (category, forward horizon slot, channel), and the engine-hosted supervision
+//     STREAM a resident Nautilus consumes (added 2026-09-04 — additive v1).
 //
 // Design rules:
 //   * grammar here, instances elsewhere — a project ships an INSTANCE (textproto) of
@@ -26,10 +29,13 @@
 //     Judgment (Overwatch: ACP + an independent model) lives IN the engine and is
 //     reached through Escalation; Nautilus records the outcome like any other forecast;
 //   * supervisor state never lives in the supervised tree — bookkeeping targets the
-//     project's postgres through a local write-ahead buffer, so recording never blocks
-//     on a stack that may be the thing that is down;
+//     project's stores through a write-ahead journal, so recording never blocks on a
+//     stack that may be the thing that is down;
 //   * every side-effecting verdict is a forecast — a recycle, a reset, a hold — stamped
 //     with the position it was rendered at, resolved within its phase horizon;
+//   * two scales, one clock — intra-workflow mechanics are tuned in seconds and
+//     minutes (nets, admission windows, idle detectors); the Backlog reads only the
+//     hour-scale outcome, on the Fibonacci hours F0..F9 = 0,1,1,2,3,5,8,13,21,34;
 //   * additive-only within v1 — new fields get new numbers, nothing is renamed.
 //
 // Seeded by zndx.engine.v1's WatchWorkload vocabulary (WorkloadProfile: intents,
@@ -100,6 +106,65 @@ message Cadence {
   string cron = 1;                    // 5-field cron in the project's local time
   int32 expected_period_seconds = 2;  // for non-cron processes (poll loops, daemons)
   int32 net_seconds = 3;              // outer net past expected completion
+  // The net as a Fibonacci-hour slot index (0..9 → 0,1,1,2,3,5,8,13,21,34 h). When
+  // set, the Backlog uses F(net_slot) as the hour-scale net; otherwise it rounds
+  // net_seconds DOWN to the nearest F. The second-scale net_seconds still governs
+  // the mechanics (silence detection). (added 2026-09-04 — additive v1.)
+  int32 net_slot = 4;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Expectations: the Operations Backlog's contract per workflow
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The empirically derived category a workflow's expectation belongs to. A
+// SKOS-ready vocabulary (scheme gaius:expectation in the reference project);
+// concepts are confirmed against a week of data before they are frozen — the
+// enum is the carrier, not the frozen scheme. (added 2026-09-04 — additive v1.)
+enum ExpectationCategory {
+  EXPECTATION_CATEGORY_UNSPECIFIED = 0;
+  EXPECTATION_CATEGORY_TICK = 1;            // ≤ 1 h cadence; miss = admission window
+                                            // exhausted; open when no completed run at
+                                            // slots 1 and 2 (observed, then confirmed)
+  EXPECTATION_CATEGORY_HOURLY_SETTLED = 2;  // 1 h with in-design backfill; miss =
+                                            // unverified past the backfill depth
+  EXPECTATION_CATEGORY_SLOT = 3;            // multi-hour slots; miss = slot not
+                                            // completed, or a run past run_net_slot
+  EXPECTATION_CATEGORY_DAILY_DEPENDENT = 4; // daily, feeds a same-day slot; miss =
+                                            // deferred/errored with no retry queued
+  EXPECTATION_CATEGORY_JUDGED = 5;          // verdict awaits another process's next run
+  EXPECTATION_CATEGORY_CHRONIC_AUDIT = 6;   // open ≥ 21 h, not degrading — briefing only
+  EXPECTATION_CATEGORY_OPERATOR_WINDOW = 7; // manual remediation needing a quiet window
+  EXPECTATION_CATEGORY_TRANSIENT = 8;       // one failure; ledger only unless open at 1 h
+}
+
+// Where a Backlog item surfaces. The ladder selects channels by slot: 1–2 LOG,
+// 3 AGENDA_EVENT, 5 REMINDER, 6 and 8 BRIEFING, 9 DISCUSSION.
+enum Channel {
+  CHANNEL_UNSPECIFIED = 0;
+  CHANNEL_LOG = 1;
+  CHANNEL_AGENDA_EVENT = 2;
+  CHANNEL_REMINDER = 3;
+  CHANNEL_BRIEFING = 4;
+  CHANNEL_DISCUSSION = 5;
+}
+
+// The hour-scale contract of one workflow. Everything here is a slot index into
+// the Fibonacci hours, never a minute count. Slot 0 is first admission into the
+// Backlog — the moment a workflow fails its natural admission window (time inside
+// the window is expected and is NOT the Backlog); slots 1 and 2 (both F = 1) are
+// the miss observed, then confirmed on the next hourly evaluation.
+message Expectation {
+  ExpectationCategory category = 1;
+  int32 horizon_slot = 2;            // slot by which a miss MUST have surfaced — the
+                                     // Backlog Objective's deadline (0 = compute
+                                     // from the category rule, rounding DOWN)
+  Channel channel = 3;               // channel at horizon_slot
+  string rationale = 4;              // why this category / horizon (beside the number)
+  string feeds = 5;                  // DAILY_DEPENDENT: Process.id of the slot it feeds
+  int32 backfill_depth = 6;          // HOURLY_SETTLED: in-design backfill (e.g. 2)
+  int32 run_net_slot = 7;            // SLOT: a claimed run older than F(slot) is at risk
+  string awaits = 8;                 // JUDGED: Process.id whose next run renders it
 }
 
 message Process {
@@ -117,6 +182,9 @@ message Process {
   // worker): held for the process's whole life, not per phase. A standing
   // intent with floor 0 is a resident GPU consumer that phases may preempt.
   repeated ResourceIntent resources = 11;
+  // The workflow's hour-scale expectation — the only place the Backlog reads.
+  // (added 2026-09-04 — additive v1.)
+  Expectation expectation = 12;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,6 +203,9 @@ enum GateKind {
   GATE_KIND_POSITION_REPORTED = 7;    // the process reported reaching this phase
   GATE_KIND_SHARE_APPLIED = 8;        // params: leaf, within_seconds — the arbiter
                                       // applied this phase's declared floors
+  GATE_KIND_BACKLOG_SURFACED = 9;     // params: category, max_slot — every open item
+                                      // of the category surfaced on its channel by
+                                      // its horizon slot (the ops_backlog objective)
 }
 
 // Who anchors an outcome. Gold = outside the trust boundary (human, or Overwatch's
@@ -230,6 +301,9 @@ message Objective {
   repeated string resolves = 7;       // TRANSITIONAL: proposition LIKE-patterns; use
                                       // phase-scoped resolution once positions flow
   map<string, string> attrs = 8;
+  // JUDGED / CHRONIC_AUDIT Backlog items born from this objective's verdicts.
+  // (added 2026-09-04 — additive v1.)
+  Expectation expectation = 9;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -258,6 +332,9 @@ message Supervisor {
   Budgets budgets = 7;
   string engine_grpc = 8;             // host:port of the supervised zndx.engine.v1
   map<string, string> attrs = 9;
+  // host:port of this project's resident Nautilus (service Nautilus below) —
+  // loopback beside the engine. (added 2026-09-04 — additive v1.)
+  string supervisor_grpc = 10;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,6 +387,8 @@ enum ProcessHealth {
   PROCESS_HEALTH_MISSING = 3;         // past warmup, not observed
   PROCESS_HEALTH_STALLED = 4;         // observed, no progress past its net
   PROCESS_HEALTH_UNSUPERVISED = 5;    // reports_positions but never reported — LOUD
+  PROCESS_HEALTH_UNOBSERVABLE = 6;    // its observing engine is MISSING — nothing can be
+                                      // said (added 2026-09-04)
 }
 
 message ProcessStatus {
@@ -335,7 +414,13 @@ message SupervisorStatus {
   repeated ArmedTrigger armed = 5;
   int32 recycles_in_window = 6;
   bool breaker_tripped = 7;
-  int64 buffered_records = 8;         // write-ahead rows not yet in postgres
+  int64 buffered_records = 8;         // write-ahead records not yet in the store
+  // (added 2026-09-04 — additive v1.)
+  bool engine_connected = 9;          // a Supervise session is live right now
+  uint64 engine_session = 10;         // EngineHello.session of that stream
+  uint64 last_event_seq = 11;
+  int64 last_tick_unix_ms = 12;       // last Backlog fill
+  int32 open_backlog_items = 13;
 }
 
 message WatchEscalationsRequest {}
@@ -350,6 +435,13 @@ message Escalation {
   Position position = 4;
   string snapshot_markdown = 5;       // deterministic snapshot for the judge
   int64 at_unix_ms = 6;
+  // (added 2026-09-04 — additive v1.) This IS the typed Overwatch consult when it
+  // rides the Supervise stream: the engine dedups consults on (trigger, scope,
+  // signature) inside its budget window.
+  string signature = 7;               // COARSE arming signature (trigger+scope+bucket)
+  bool report_only = 8;               // record the firing; do not invoke the judge
+                                      // (e.g. the FAIL is the judge's own call)
+  int32 backlog_slot = 9;             // trigger = "backlog_slot": the slot crossed
 }
 
 message LoadSpecRequest {
@@ -357,16 +449,386 @@ message LoadSpecRequest {
   bool textproto = 2;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Wire: the Backlog read shape (served by BOTH Nautilus and the engine)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// State of one Backlog slot. UNSPECIFIED = the slot is not filled.
+enum BacklogState {
+  BACKLOG_STATE_UNSPECIFIED = 0;
+  BACKLOG_STATE_OK = 1;
+  BACKLOG_STATE_DEFERRED = 2;
+  BACKLOG_STATE_MISSED = 3;
+  BACKLOG_STATE_FAILED = 4;
+  BACKLOG_STATE_JUDGED_FAIL = 5;
+  BACKLOG_STATE_AWAITING = 6;
+  BACKLOG_STATE_UNKNOWN = 7;          // the observing engine was dark at the tick
+}
+
+message BacklogRequest {
+  string project = 1;
+  string workflow = 2;                // "" = every declared workflow
+  int64 as_of_unix_ms = 3;            // 0 = now
+  bool include_ok = 4;                // include workflows with no open item
+}
+
+message BacklogSlot {
+  int32 slot = 1;                     // 0..9
+  BacklogState state = 2;
+  int64 window_start_unix_ms = 3;
+  int64 filled_unix_ms = 4;
+  string evidence_json = 5;
+}
+
+message BacklogRow {
+  string workflow = 1;                // Process.id
+  ExpectationCategory category = 2;
+  int32 horizon_slot = 3;
+  repeated BacklogSlot slots = 4;     // exactly 10 (0..9); unfilled = UNSPECIFIED
+  int32 escalation_level = 5;         // deepest slot filled with a miss; 0 = clean
+  Channel channel = 6;                // channel the escalation level selects
+  string item_key = 7;                // stable (class, failure mode); re-opens with history
+  int64 first_miss_unix_ms = 8;
+  int64 horizon_unix_ms = 9;          // the Backlog Objective's surfacing deadline
+  int64 surfaced_unix_ms = 10;        // from the project's DirectiveResult
+  int64 resolved_unix_ms = 11;
+}
+
+message BacklogResponse {
+  string project = 1;
+  int64 as_of_unix_ms = 2;
+  int64 last_tick_unix_ms = 3;
+  bool supervisor_connected = 4;      // engine-served: is a Supervise session live
+  string epoch = 5;
+  repeated BacklogRow rows = 6;
+}
+
+message TickRequest {
+  int64 window_start_unix_ms = 1;     // 0 = the current hour
+  string source = 2;                  // "timer" | "resident" | "operator"
+  bool force = 3;                     // re-derive; write only changed cells
+}
+
+message TickResponse {
+  bool ran = 1;                       // false = already filled for this window
+  int64 window_start_unix_ms = 2;
+  int32 rows_filled = 3;
+  string note = 4;
+}
+
 // The supervisor's face. Engines and flows are CLIENTS of Nautilus for reporting;
-// Nautilus is a client of the engine's zndx.engine.v1 for observation and Overwatch.
+// Nautilus is a client of the engine's zndx.engine.v1 for observation and of the
+// engine-hosted EngineSupervision stream for events and directives.
 service Nautilus {
   // A process reports reaching a gate boundary. Unknown process/phase is rejected
   // loudly (Ack.accepted=false) — an unsupervised report is a spec bug, not noise.
   rpc ReportPosition(PositionReport) returns (Ack);
   rpc Heartbeat(HeartbeatRequest) returns (Ack);
   rpc Status(StatusRequest) returns (SupervisorStatus);
-  // The engine subscribes; each Escalation is handed to its Overwatch capability.
+  // Operators and peers watch what Nautilus escalates. For the LOCAL engine the
+  // consult rides the Supervise stream; this is a tee of the same Escalations.
   rpc WatchEscalations(WatchEscalationsRequest) returns (stream Escalation);
   // Operator: load or replace the instance. Validation failures are rejected whole.
   rpc LoadSpec(LoadSpecRequest) returns (Ack);
+  // (added 2026-09-04 — additive v1.)
+  rpc Backlog(BacklogRequest) returns (BacklogResponse);
+  // The hourly fill; idempotent on window_start (the systemd timer's second hand).
+  rpc Tick(TickRequest) returns (TickResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wire: the engine-hosted supervision stream (added 2026-09-04 — additive v1)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The ENGINE serves this; the resident Nautilus DIALS it. Engine death is then the
+// supervisor's own observation (the stream drops), the engine needs no supervisor
+// address and runs identically with none connected, and "observe through engines"
+// holds literally — Nautilus never reads the engine's tables. Events carry the
+// SOURCE timestamp (a row's own time, never emission time) so replayed and live
+// events sort and dedupe identically; `seq` is a per-session gap detector, not the
+// durable cursor. At-least-once both ways: Nautilus dedups events on
+// (kind, natural key, state, at); the engine dedups directives on directive_id.
+
+// Lifecycle of a task-queue row as the engine sees it.
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_QUEUED = 1;              // row inserted (pg_cron | manual | engine)
+  TASK_STATE_CLAIMED = 2;             // picked up by a worker
+  TASK_STATE_HEARTBEAT = 3;           // progress stamped — the anti-orphan signal
+  TASK_STATE_COMPLETED = 4;
+  TASK_STATE_DEFERRED = 5;            // reason: yk_admission | yk_envelope | singleton
+                                      // — the admission window was exhausted: slot 0
+  TASK_STATE_FAILED = 6;              // slot 0
+  TASK_STATE_ERROR = 7;               // slot 0
+  TASK_STATE_STALLED = 8;             // the worker killed a silent child
+  TASK_STATE_YIELDED = 9;             // preempted (arbiter / C2)
+  TASK_STATE_SKIPPED = 10;
+  TASK_STATE_RESET = 11;              // claim released; reason: orphan | nohandler |
+                                      // singleton | watchdog
+}
+
+message TaskLifecycle {
+  int64 task_id = 1;
+  string task_type = 2;               // == Process.observation.locator (TASK_QUEUE)
+  TaskState state = 3;
+  string reason = 4;                  // deferred / reset sub-reason
+  string error = 5;                   // truncated error text
+  string source = 6;                  // pg_cron | manual | engine
+  int64 scheduled_for_unix_ms = 7;
+  int64 picked_up_unix_ms = 8;
+  int64 heartbeat_unix_ms = 9;
+  int64 completed_unix_ms = 10;
+  string workload_id = 11;            // arbiter application id once spawned
+  map<string, string> evidence = 12;  // opaque: returncode, idle_seconds, ...
+}
+
+enum AdmissionPhase {
+  ADMISSION_PHASE_UNSPECIFIED = 0;
+  ADMISSION_PHASE_PENDING = 1;
+  ADMISSION_PHASE_ADMITTED = 2;
+  ADMISSION_PHASE_NOTADMITTED = 3;    // admit net exhausted (pairs with DEFERRED)
+  ADMISSION_PHASE_RETIRED = 4;
+}
+
+// Arbiter-facing enrichment of an admission; TaskLifecycle is the replayable truth.
+message AdmissionEvent {
+  string workload_id = 1;
+  string kind = 2;                    // wrk kind ("clt-skos-admit", "article-curate")
+  string leaf = 3;                    // queue FQN
+  AdmissionPhase phase = 4;
+  int64 wait_ms = 5;                  // time in the window before the phase landed
+  int64 net_ms = 6;                   // the admit net that applied
+  int32 priority = 7;
+  repeated string holders = 8;        // application ids holding the leaf at NOTADMITTED
+  int64 task_id = 9;
+}
+
+// The objective / ledger verdict vocabulary.
+enum Verdict {
+  VERDICT_UNSPECIFIED = 0;
+  VERDICT_PASS = 1;
+  VERDICT_FAIL = 2;
+  VERDICT_INCONCLUSIVE = 3;
+  VERDICT_ERROR = 4;
+}
+
+message GateResult {
+  string name = 1;
+  Verdict verdict = 2;
+  string detail = 3;
+  Tier tier = 4;
+}
+
+message ObjectiveVerdict {
+  string objective = 1;               // Objective.name
+  string run_id = 2;
+  Verdict verdict = 3;
+  int32 gates_passed = 4;
+  int32 gates_total = 5;
+  bool judge_rendered = 6;            // a JUDGE_RUBRIC final call formed this verdict
+  string awaits = 7;                  // Process.id whose next run refreshes it ("" = none)
+  int64 started_unix_ms = 8;
+  int64 completed_unix_ms = 9;
+  repeated GateResult gates = 10;
+}
+
+enum IncidentState {
+  INCIDENT_STATE_UNSPECIFIED = 0;
+  INCIDENT_STATE_ACTIVE = 1;
+  INCIDENT_STATE_HEALING = 2;
+  INCIDENT_STATE_RECOVERING = 3;
+  INCIDENT_STATE_RESOLVED = 4;
+  INCIDENT_STATE_MANUAL_REQUIRED = 5;
+}
+
+message IncidentEvent {
+  string fingerprint = 1;             // failure_mode:endpoint — the stable item key
+  IncidentState state = 2;
+  int32 tier = 3;
+  string endpoint = 4;
+  string failure_mode = 5;
+  string sequence_id = 6;
+  int32 sequence_num = 7;
+  string event_type = 8;              // the healing-event type as recorded
+}
+
+// Mirrors zndx.engine.v1.WorkloadStatus BY NUMBER; kept import-free.
+enum ServingStatus {
+  SERVING_STATUS_UNSPECIFIED = 0;
+  SERVING_STATUS_SERVING = 1;
+  SERVING_STATUS_STARTING = 2;
+  SERVING_STATUS_DEGRADED = 3;
+  SERVING_STATUS_FAILED = 4;
+  SERVING_STATUS_ABSENT = 5;
+}
+
+enum ServingPhase {
+  SERVING_PHASE_UNSPECIFIED = 0;
+  SERVING_PHASE_SETTLED = 1;
+  SERVING_PHASE_TRANSITIONING = 2;
+}
+
+// Flattened WatchWorkload mirror so ONE stream feeds the serving-desync trigger.
+message ServingEvent {
+  ServingPhase phase = 1;
+  uint64 generation = 2;
+  string capability = 3;              // == Process.observation.locator (SERVING_ENDPOINT)
+  string alias = 4;
+  string model = 5;
+  ServingStatus actual = 6;
+  int32 warmup_seconds = 7;
+  int64 settled_unix_ms = 8;
+}
+
+message EngineHello {
+  string project = 1;
+  string engine_build = 2;            // the ledger's engine_rev — the OBSERVED epoch half
+  string spec_version = 3;            // the instance the engine loaded
+  string spec_sha256 = 4;             // sha256 of the textproto bytes the engine loaded
+  int64 boot_unix_ms = 5;
+  uint64 session = 6;                 // boot-scoped; seq restarts at 1 per session
+  string engine_grpc = 7;
+  repeated string capabilities = 8;   // "replay:scheduled_tasks", "directive:reclaim_orphan", ...
+}
+
+message EngineHeartbeat {
+  int64 at_unix_ms = 1;
+  uint64 last_seq = 2;                // gap detector
+  int32 queued_tasks = 3;
+  int32 claimed_tasks = 4;
+  int64 oldest_silence_ms = 5;        // max(now − last progress) over claimed rows
+  int32 daemons_running = 6;
+  int32 daemons_total = 7;
+  uint64 supervisor_acked_seq = 8;    // what the engine believes Nautilus has durably taken
+}
+
+message DirectiveResult {
+  string directive_id = 1;
+  bool accepted = 2;                  // well-formed, known scope
+  bool applied = 3;                   // side effect performed (false on dry_run /
+                                      // precondition fail)
+  string note = 4;                    // why not; or "agenda:<id>" / "judge:<status>"
+  string forecast_id = 5;             // the ledger row the engine recorded for it
+  string judge_status = 6;            // verdict | judge_unavailable | judge_error |
+                                      // budget_exhausted | not_invoked
+  int64 at_unix_ms = 7;
+}
+
+message ReplayComplete {
+  int64 since_unix_ms = 1;
+  uint64 through_seq = 2;
+  int32 events = 3;
+  repeated string tables = 4;
+  bool clamped = 5;                   // `since` was older than the engine's replay window
+}
+
+enum GoodbyeReason {
+  GOODBYE_REASON_UNSPECIFIED = 0;
+  GOODBYE_REASON_SUPERSEDED = 1;      // a newer Subscribe with the same supervisor_id
+  GOODBYE_REASON_SHUTDOWN = 2;
+  GOODBYE_REASON_PROJECT_MISMATCH = 3;
+}
+
+message Goodbye {
+  GoodbyeReason reason = 1;
+  string note = 2;
+}
+
+message EngineEvent {
+  uint64 seq = 1;
+  int64 at_unix_ms = 2;               // SOURCE timestamp
+  string epoch = 3;                   // spec_version+engine_build as the engine sees it
+  bool replayed = 4;
+  oneof event {
+    EngineHello hello = 10;
+    EngineHeartbeat heartbeat = 11;
+    TaskLifecycle task = 12;
+    AdmissionEvent admission = 13;
+    PositionReport position = 14;     // engine-INFERRED positions (step start → phase)
+    ObjectiveVerdict objective = 15;
+    IncidentEvent incident = 16;
+    ServingEvent serving = 17;
+    DirectiveResult directive_result = 18;
+    ReplayComplete replay_complete = 19;
+    Goodbye goodbye = 20;
+  }
+}
+
+message Subscribe {
+  string supervisor_id = 1;           // stable across restarts: "nautilus:<project>@<host>"
+  string project = 2;                 // must equal the engine's → else Goodbye{PROJECT_MISMATCH}
+  string spec_version = 3;
+  string spec_sha256 = 4;             // drift vs EngineHello.spec_sha256 is itself an
+                                      // operator-window item
+  int64 since_unix_ms = 5;            // 0 = live only; the engine clamps to its window
+  uint64 resume_session = 6;          // last EngineHello.session seen (0 = none)
+  uint64 resume_seq = 7;
+  repeated string capabilities = 8;
+}
+
+// Cumulative: events with seq <= through_seq are durable in the supervisor's store.
+// This is the write-ahead rule made explicit: the engine's own tables and ring are
+// the log until the supervisor has taken the record.
+message SupervisorAck {
+  uint64 through_seq = 1;
+}
+
+message SupervisorHeartbeat {
+  int64 at_unix_ms = 1;
+  int64 buffered_records = 2;
+  int64 last_tick_unix_ms = 3;
+}
+
+// Replaces a wall-clock task watchdog: the supervisor measured SILENCE since the
+// last progress signal and asks the engine to release the orphaned claim. The
+// engine re-checks the precondition (a heartbeat that landed after the supervisor's
+// snapshot voids it; a live child refuses it) — the supervisor never kills.
+message ReclaimOrphan {
+  int64 task_id = 1;
+  string task_type = 2;
+  int64 silence_ms = 3;               // now − last progress, as the supervisor saw it
+  int64 net_ms = 4;                   // the silence net it exceeded
+  Position position = 5;
+  string evidence_json = 6;
+  bool dry_run = 7;                   // adoption: record the forecast, do not reset
+}
+
+// Sent when a Backlog item crosses a CHANNEL slot (3, 5, 6, 8, 9) or resolves. The
+// project turns it into its channel (an Agenda Event, a Reminder entry, briefing
+// material) and answers with a DirectiveResult carrying `surfaced` evidence.
+message BacklogTransition {
+  string workflow = 1;
+  string item_key = 2;
+  int32 slot = 3;
+  BacklogState state = 4;
+  ExpectationCategory category = 5;
+  Channel channel = 6;
+  int64 window_start_unix_ms = 7;
+  int64 first_miss_unix_ms = 8;
+  int64 horizon_unix_ms = 9;
+  string evidence_json = 10;
+  bool resolved = 11;
+}
+
+message SupervisorMessage {
+  string directive_id = 1;            // uuidv7; idempotency key; "" for
+                                      // Subscribe / Ack / Heartbeat
+  int64 at_unix_ms = 2;
+  oneof message {
+    Subscribe subscribe = 10;
+    SupervisorAck ack = 11;
+    SupervisorHeartbeat heartbeat = 12;
+    ReclaimOrphan reclaim_orphan = 13;
+    Escalation escalation = 14;       // the typed Overwatch consult (see Escalation)
+    BacklogTransition backlog_transition = 15;
+  }
+}
+
+// Served by the ENGINE beside zndx.engine.v1.Engine. One active session per
+// supervisor_id (a newer Subscribe supersedes; the old stream gets Goodbye).
+service EngineSupervision {
+  rpc Supervise(stream SupervisorMessage) returns (stream EngineEvent);
+  // Read-through of the project's Backlog store (still answers when the supervisor
+  // is dark — a stale last_tick is the honest signal).
+  rpc Backlog(BacklogRequest) returns (BacklogResponse);
 }

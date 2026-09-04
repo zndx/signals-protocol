@@ -223,3 +223,52 @@ escalation, not the dead engine's own.
 - Nautilus does not schedule work (that is the scheduler protocol and YuniKorn).
 - Nautilus does not host models, agents, or judgment.
 - The protocol does not know any project: no package, message, or enum names one.
+
+## 11. The engine supervision stream and the Operations Backlog (2026-09-04)
+
+**Topology.** A resident Nautilus runs beside each project's engine as a first-class
+process and speaks gRPC to that engine only. The ENGINE serves `EngineSupervision.
+Supervise(stream SupervisorMessage) returns (stream EngineEvent)`; Nautilus dials it.
+Engine death is therefore the supervisor's own observation (the stream drops), the
+engine needs no supervisor address and runs identically with none connected, and
+"observe through engines" (§4) holds literally — Nautilus never reads the engine's
+tables. The engine propagates supervisory messages across the federated mesh over
+peer messaging; peers observe peers, and no engine writes another engine's ledger.
+
+**Events and replay.** `EngineEvent` carries the SOURCE timestamp (a row's own time)
+so replayed and live events sort and dedupe identically; `seq` is a per-session gap
+detector. On `Subscribe{since}` the engine replays its own tables (clamped to its
+window, ≥ 36 h — the deepest Backlog slot is 34 h) and then streams live. Nautilus
+acks `through_seq` only once the record is durable in its own store: that is the
+write-ahead rule of §6 made explicit, with the engine's tables as the log until the
+supervisor has taken the record.
+
+**Directives.** Nautilus never kills. It measures SILENCE since a task's last progress
+signal (never age since claim) and sends `ReclaimOrphan`; the engine re-checks the
+precondition (a heartbeat after the snapshot voids it; a live child refuses it) and
+records the reset as a forecast — this subsumes any wall-clock task watchdog. An
+`Escalation` on the stream IS the typed Overwatch consult (judge stays in the engine,
+fail-closed). Every directive is answered by a `DirectiveResult` carrying the ledger
+row the engine recorded; the engine dedups on `directive_id`.
+
+**Expectations and the Backlog.** Each cadenced `Process` declares an `Expectation`
+(category, horizon slot, channel). The Backlog clock is Fibonacci hours, F0..F9 =
+0, 1, 1, 2, 3, 5, 8, 13, 21, 34: slot 0 is first admission into the Backlog — the
+moment a workflow fails its natural admission window (time inside the window is the
+arbiter working, not Backlog time); slots 1 and 2 (both 1 h) are the miss observed
+then confirmed on consecutive hourly evaluations (the repeat separates a transient
+from an open item); the deepest slot holding a miss is the escalation level and
+selects the channel (3 Agenda Event, 5 Reminder, 6 and 8 briefing, 9 discussion).
+Computed horizons round DOWN — surface early, never late. A healthy workflow fills
+`ok` at slot 0 each hour and slots 1–9 stay empty; a slot flipping back to `ok`
+resolves the item and its history stays. `Nautilus.Tick` is idempotent on the hour;
+a systemd timer is the second hand while the resident runs. Intra-workflow mechanics
+(admission nets, idle detectors) stay in seconds — two scales, one clock.
+
+**Bookkeeping (§6 amended).** The supervisor's own records (backlog cells, trigger
+firings, directives and their results, positions) are protobuf messages of this
+package written first to a write-ahead journal (nisshi, an object-store log) and
+drained into the project's tiered store; `SupervisorStatus.buffered_records` is the
+journal lag. Recording never touches a filesystem path and never blocks on the
+supervised stack. Each project's Backlog is a governed data product of the
+federation's data-products history.
