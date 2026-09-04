@@ -109,6 +109,17 @@ details (internal vLLM ports, log paths) stay absent.
 
 See [`surfaces.md`](surfaces.md) for the peer implementation note.
 
+## OIP `llm_tools_v1`
+
+Additive convention on existing OIP `ModelInfer` / `ModelStreamInfer`
+messages (do not fork the OIP proto). Advertise
+`ServerMetadata.extensions += ["llm_tools_v1"]`. Extra tensors (`tools`,
+`messages`, output `tool_calls`) are sent **only** to peers that
+advertise the extension. Full table: Hermes working copy
+`specification/protocol/oip_mandatory.md` (vendored) until this tree
+gains that file. `Complete.tools_json` / `messages_json` / `ToolCall`
+MUST lower to those tensors when the peer advertises the extension.
+
 ## Announce
 
 Additive v1. A joining engine **pushes** a `PeerHint` to a directory engine
