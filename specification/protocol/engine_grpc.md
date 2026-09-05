@@ -82,6 +82,13 @@ when present), week-wide tablets, settle after 4 weeks. `tx_id` is identity
 
 Peer products on shared RustFS: [`data_products.md`](data_products.md).
 
+## Render (keyframe)
+
+Design: [`keyframe.md`](keyframe.md). Additive `Engine/Render` — caller
+sends a conversation graph; a viz engine (Gaius) returns `product_id` +
+RustFS `data_uri` (+ optional small `preview_jpeg`). LuxCore does not
+leave Gaius. Non-renderers: `UNIMPLEMENTED`.
+
 ## ServerQuery
 
 Pairwise **server-to-server query** (Matrix Server-Server *Queries*). Not
