@@ -14,7 +14,7 @@ as a LuxCore still. LuxCore stays on Gaius. The federation face is
 | PATHOCL / cards machinery / GPU eviction | **Gaius** |
 | Object bytes | **Signals RustFS** (`data_uri`) |
 | Warehouse row | Signals (`tx` / `details`) when the still is a product fact |
-| Morph / P-frames | Caller UI (browser) |
+| Forward-sim (P-frames) | **Caller engine** (Hermes `hsengine`). Asks YuniKorn for **one 4090**, `RESOURCE_CLASS_LIGHT`. Gaius does not interpolate. |
 
 Engines that are not a renderer return `UNIMPLEMENTED` (honest).
 
@@ -58,11 +58,19 @@ rpc Render(RenderRequest) returns (RenderResponse);
 `Complete` is the wrong shape (inference). `Yield` is sentinel teardown.
 Do not overload `ServerQuery`.
 
+Forward-simulation is **not** Gaius. After `Render`, the caller streams
+the still (`data_uri`) onto its own object plane if it wants a replica,
+then runs interpolator code **in its engine**. GPU: declare a LIGHT
+workload (one 4090); YuniKorn admits it (`WatchWorkload` / queue share).
+The dashboard only views the resulting frames. The interpolator does not
+run in browser JS and does not import pyluxcore.
+
 ## Hermes plugin
 
 `signals-listen` `plugin_api` is a gRPC **client** of Gaius `:50051`
 `Engine/Render` (same stub as `signals-oip`). It does not import pyluxcore.
-The dashboard JS only sees `data_uri` + preview (via plugin HTTP).
+The dashboard JS is a **viewer** of Hermes-engine forward-sim frames
+(via plugin HTTP/WS). It does not morph.
 
 ## WebRTC
 
