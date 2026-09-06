@@ -69,7 +69,9 @@ enum SourceKind {
   SOURCE_KIND_UNSPECIFIED = 0;
   SOURCE_KIND_ENGINE_GRPC = 1;        // zndx.engine.v1 Status / WatchWorkload
   SOURCE_KIND_METAFLOW_STORE = 2;     // runs_v3 / steps_v3 (locator = flow_id)
-  SOURCE_KIND_AIRFLOW_METADATA = 3;   // dag_run / task_instance (locator = dag_id)
+  SOURCE_KIND_AIRFLOW_METADATA = 3;   // dag_run / task_instance (locator = dag_id) — observed
+                                      // THROUGH the local engine (ActivityEvent; Engine/ServerQuery
+                                      // kind=ACTIVITIES), never the Airflow DB, never Signals directly
   SOURCE_KIND_PG_CRON = 4;            // cron.job_run_details (locator = jobname)
   SOURCE_KIND_SYSTEMD = 5;            // unit active state (locator = unit name)
   SOURCE_KIND_TASK_QUEUE = 6;         // scheduled_tasks rows (locator = task_type)
@@ -136,6 +138,10 @@ enum ExpectationCategory {
   EXPECTATION_CATEGORY_CHRONIC_AUDIT = 6;   // open ≥ 21 h, not degrading — briefing only
   EXPECTATION_CATEGORY_OPERATOR_WINDOW = 7; // manual remediation needing a quiet window
   EXPECTATION_CATEGORY_TRANSIENT = 8;       // one failure; ledger only unless open at 1 h
+  EXPECTATION_CATEGORY_COORDINATION = 9;    // an inter-project Activity (Airflow run via the
+                                            // local engine): a process ceded to it is `ceded`,
+                                            // not missed; an activity past its horizon without
+                                            // release is the item (added 2026-09-06)
 }
 
 // Where a Backlog item surfaces. The ladder selects channels by slot: 1–2 LOG,
@@ -734,6 +740,32 @@ message Goodbye {
   string note = 2;
 }
 
+// A coordination Activity as the LOCAL engine saw it (flattened mirror of
+// zndx.engine.v1.Activity — this file imports nothing). The engine learned it
+// from Signals (Scheduler/WatchActivities) or declared it itself; the
+// supervisor never reads Airflow or Signals. `transition` is what changed
+// from this engine's point of view; `ceded` names this engine's own process
+// ids whose intent is ceded to the activity while it runs (e.g.
+// endpoint.thinking) — a ceded process is `ceded`, never missed.
+// (added 2026-09-06 — additive v1.)
+message ActivityEvent {
+  string activity_id = 1;
+  string kind = 2;                    // interactive_session | curation_window | …
+  string peer = 3;                    // declaring project
+  string owner = 4;
+  string dag_id = 5;
+  string run_id = 6;
+  string state = 7;                   // queued | running | released | expired | failed | superseded
+  int64 declared_ns = 8;
+  int64 horizon_ns = 9;
+  int64 ended_ns = 10;
+  repeated string precludes = 11;
+  map<string, string> postures = 12;
+  string reason = 13;
+  string transition = 14;             // observed | started | renewed | released | expired | failed | declared
+  repeated string ceded = 15;         // this engine's Process ids ceded to the activity
+}
+
 message EngineEvent {
   uint64 seq = 1;
   int64 at_unix_ms = 2;               // SOURCE timestamp
@@ -751,6 +783,7 @@ message EngineEvent {
     DirectiveResult directive_result = 18;
     ReplayComplete replay_complete = 19;
     Goodbye goodbye = 20;
+    ActivityEvent activity = 21;      // coordination Activities via the local engine (added 2026-09-06)
   }
 }
 

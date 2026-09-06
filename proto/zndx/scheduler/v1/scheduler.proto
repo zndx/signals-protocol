@@ -65,6 +65,20 @@ service Scheduler {
   // (added 2026-08-22, gaius — additive v1.)
   rpc RequestQueueShare(QueueShareRequest) returns (QueueShareResponse);
   rpc ListQueueShareRequests(ListQueueShareRequestsRequest) returns (ListQueueShareRequestsResponse);
+
+  // ── Coordination Activities (intent with a lifetime) ──────────────────
+  // A peer ENGINE declares an Activity (zndx.engine.v1.Activity) on behalf of
+  // one of its local processes; Signals materialises it as a run of its own
+  // Airflow DAG and is the ONLY party that talks to Airflow. Peers renew
+  // before the horizon, release when done, and Watch to learn every peer's
+  // in-force activities. Local processes never call these: they ask their
+  // local engine (Engine/ServerQuery kind=ACTIVITIES; supervision
+  // ActivityEvent). (added 2026-09-06 — additive v1.)
+  rpc DeclareActivity(DeclareActivityRequest) returns (ActivityResponse);
+  rpc RenewActivity(RenewActivityRequest) returns (ActivityResponse);
+  rpc ReleaseActivity(ReleaseActivityRequest) returns (ActivityResponse);
+  rpc ListActivities(ListActivitiesRequest) returns (ListActivitiesResponse);
+  rpc WatchActivities(WatchActivitiesRequest) returns (stream ActivityWatchEvent);
 }
 
 // ── Roots ───────────────────────────────────────────────────────────────
@@ -478,4 +492,70 @@ message QueueShareRecord {
 
 message ListQueueShareRequestsResponse {
   repeated QueueShareRecord records = 1;
+}
+
+// ── Coordination Activities (added 2026-09-06 — additive v1) ────────────
+//
+// Signals owns the `coord_activity` DAG in the shared Airflow. Declare = a
+// new dag run whose conf is the declaration and whose dagrun timeout is the
+// horizon; Renew = a NEW run carrying the same activity_id (the old run is
+// marked SUPERSEDED); Release = the current run marked success with a
+// release note before the horizon; an unrenewed horizon = EXPIRED (the run
+// completed on its own). The Airflow run state is the truth peers read.
+
+message DeclareActivityRequest {
+  string peer = 1;                  // declaring engine's project (must be an allowed peer)
+  string request_id = 2;            // uuidv7; idempotent (a retry returns the same activity)
+  string kind = 3;                  // interactive_session | curation_window | restart_window | maintenance_pause | …
+  string owner = 4;                 // the declarer within the peer
+  int64 horizon_ns = 5;             // unix ns; the intent expires here unless renewed/released
+  repeated zndx.engine.v1.ActivityClaim claims = 6;
+  repeated string precludes = 7;    // YK leaf FQNs peers must not admit into while RUNNING
+  map<string, string> postures = 8; // "<project>.endpoint.<alias>" → "hold-uptime", …
+  string reason = 9;
+}
+
+message RenewActivityRequest {
+  string peer = 1;
+  string activity_id = 2;
+  int64 horizon_ns = 3;             // the new horizon (must be later than now)
+}
+
+message ReleaseActivityRequest {
+  string peer = 1;
+  string activity_id = 2;
+  string outcome = 3;               // human: "hangup", "session ended", "aborted: …"
+}
+
+message ActivityResponse {
+  bool accepted = 1;
+  zndx.engine.v1.Activity activity = 2;
+  string error = 3;                 // guru when Signals cannot reach Airflow / refuses the peer
+}
+
+message ListActivitiesRequest {
+  string peer = 1;                  // empty = all peers
+  string kind = 2;                  // empty = all kinds
+  bool active_only = 3;             // QUEUED + RUNNING only
+  int64 since_ns = 4;               // 0 = Signals default window
+  int32 limit = 5;                  // 0 = backend default
+}
+
+message ListActivitiesResponse {
+  repeated zndx.engine.v1.Activity activities = 1;
+  int64 observed_ns = 2;            // when Signals last read Airflow
+}
+
+message WatchActivitiesRequest {
+  string peer = 1;                  // the watching engine's project (for the log)
+}
+
+// Every event carries the FULL set of activities in force (QUEUED/RUNNING)
+// plus those that ended within Signals' trailing window (≥ 5 min) so a
+// watcher sees terminal states once; a client REPLACES its view on every
+// event — absence means ended. Signals emits on change and at least every
+// 60 s as a heartbeat, so a silent stream is a dead stream.
+message ActivityWatchEvent {
+  repeated zndx.engine.v1.Activity activities = 1;
+  int64 observed_ns = 2;
 }

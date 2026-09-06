@@ -272,6 +272,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_PRODUCTS = 9;        // federated data products this peer publishes
   SERVER_QUERY_KIND_COGNITION = 10;      // a peer's cognition overview (thought/cycle buckets)
   SERVER_QUERY_KIND_CONTRIBUTIONS = 11;  // a peer's contributions by source and workflow (ProductHint)
+  SERVER_QUERY_KIND_ACTIVITIES = 12;     // coordination Activities this engine knows (its own + peers', as learned from Signals)
 }
 
 message GitRemote {
@@ -362,6 +363,65 @@ message ServerQueryResponse {
   repeated ProductHint products = 11; // kind=PRODUCTS
   CognitionHint cognition = 12;       // kind=COGNITION (added 2026-08-31, gaius — additive v1.)
   ContributionsHint contributions = 13; // kind=CONTRIBUTIONS (added 2026-08-31, gaius — additive v1.)
+  repeated Activity activities = 14;  // kind=ACTIVITIES (added 2026-09-06 — additive v1.)
+}
+
+// ── Coordination Activities (added 2026-09-06 — additive v1) ─────────────
+//
+// An Activity is inter-project INTENT WITH A LIFETIME: "the interactive
+// session owns agent-rtc for the next hour; gaius, do not chase your thinking
+// uptime meanwhile". It is materialised as a run of a Signals-owned Airflow
+// DAG in the shared Signals Airflow — the federation's coordination surface —
+// so it has an owner, a reason, a state machine, a history, a UI, and a place
+// in every project's Backlog.
+//
+// TOPOLOGY (two hops, never one): a project's LOCAL processes (flows, an
+// interactive session, its Nautilus) speak only to their LOCAL engine; the
+// federated ENGINES speak to the Signals engine over
+// zndx.scheduler.v1.Scheduler (Declare/Renew/Release/List/Watch); ONLY the
+// Signals engine speaks to Airflow. Engines re-expose what they learn here
+// (ServerQuery kind=ACTIVITIES) and on zndx.supervision.v1 (ActivityEvent).
+//
+// SEMANTICS peers agree on:
+//   claims     — YK leaves the activity occupies (informational; YK admits)
+//   precludes  — YK leaf FQNs peers must NOT admit new work into while RUNNING
+//   postures   — "<project>.endpoint.<alias>" → "hold-uptime": that project
+//                cedes the endpoint's intent (no restart chase, no unit recycle)
+//                until the activity ends; other keys are additive vocabulary
+//   horizon    — the run's own timeout; the owner renews (a new run, same
+//                activity_id) or releases; expiry is a release by absence
+enum ActivityState {
+  ACTIVITY_STATE_UNSPECIFIED = 0;
+  ACTIVITY_QUEUED = 1;      // declared; the run has not started yet (intent NOT yet in force)
+  ACTIVITY_RUNNING = 2;     // intent in force
+  ACTIVITY_RELEASED = 3;    // the owner released it before the horizon
+  ACTIVITY_EXPIRED = 4;     // the horizon passed without release or renewal
+  ACTIVITY_FAILED = 5;      // the run failed — intent NOT in force
+  ACTIVITY_SUPERSEDED = 6;  // renewed: a later run carries the same activity_id
+}
+
+message ActivityClaim {
+  string leaf = 1;          // YK leaf FQN, e.g. root.internal.inference.agent-rtc
+  int32 gpu = 2;            // federation.zndx.org/gpu tokens (0 = none / token-metered)
+}
+
+message Activity {
+  string activity_id = 1;   // stable across renewals (Signals-minted uuidv7)
+  string kind = 2;          // interactive_session | curation_window | restart_window | maintenance_pause | …
+  string peer = 3;          // declaring engine's project (hermes, gaius, …)
+  string owner = 4;         // the declarer within the peer (session id, process id)
+  string dag_id = 5;        // the Signals Airflow DAG carrying it (coord_activity)
+  string run_id = 6;        // the CURRENT dag run (changes on renewal)
+  ActivityState state = 7;
+  int64 declared_ns = 8;    // unix ns of the first declaration
+  int64 horizon_ns = 9;     // intent expires here unless renewed or released
+  int64 renewed_ns = 10;    // 0 = never renewed
+  int64 ended_ns = 11;      // 0 while in force
+  repeated ActivityClaim claims = 12;
+  repeated string precludes = 13;
+  map<string, string> postures = 14;
+  string reason = 15;       // human: why the activity exists
+  string note = 16;         // Signals-written outcome ("released by hermes: hangup", "renewed → run …")
 }
 
 // A peer's cognition OVERVIEW — discovery only, at a serving-engine-chosen
