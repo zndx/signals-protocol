@@ -496,12 +496,15 @@ message ListQueueShareRequestsResponse {
 
 // ── Coordination Activities (added 2026-09-06 — additive v1) ────────────
 //
-// Signals owns the `coord_activity` DAG in the shared Airflow. Declare = a
-// new dag run whose conf is the declaration and whose dagrun timeout is the
-// horizon; Renew = a NEW run carrying the same activity_id (the old run is
-// marked SUPERSEDED); Release = the current run marked success with a
-// release note before the horizon; an unrenewed horizon = EXPIRED (the run
-// completed on its own). The Airflow run state is the truth peers read.
+// Signals owns the coordination DAGs in the shared Airflow and holds a LEASE
+// per activity (heartbeat, horizon, TTL). Airflow OBSERVES the activity the
+// way it observes any external process — a deferrable Sensor whose trigger
+// polls the lease — so nobody patches a run's state. Declare = one dag run
+// whose conf is the declaration; Renew = a heartbeat on the lease (re-sets
+// the horizon; no new run); Release = the lease marked released, which the
+// sensor observes (run success → RELEASED); heartbeats stopping for the TTL
+// or the horizon passing = lapsed, observed the same way (→ EXPIRED). The
+// Airflow run state is the truth peers read.
 
 message DeclareActivityRequest {
   string peer = 1;                  // declaring engine's project (must be an allowed peer)

@@ -37,6 +37,13 @@ local process ──(local engine RPC)──▶ project ENGINE ──(zndx.sched
   learns.
 - **Only the Signals engine speaks to Airflow.** No peer holds an Airflow URL
   or token.
+- **Only Signals gRPC crosses hosts.** This category of coordination is critical
+  functionality for Signals and for the protocol itself: it abstracts Airflow
+  from the federated engines, so every project coordinates over the gRPC
+  interface even when Signals + Airflow run on a remote host with nothing but
+  the Signals gRPC port open between hosts. Airflow, the lease endpoint the
+  sensor polls, the DAG ConfigMap and the host bridge are Signals-internal
+  topology behind that port — never a requirement on a peer's network.
 
 ## Vocabulary (`zndx.engine.v1.Activity`)
 
@@ -56,17 +63,29 @@ local process ──(local engine RPC)──▶ project ENGINE ──(zndx.sched
 Intent is **in force** only while `RUNNING`. `QUEUED` is declared-not-yet-
 started; peers may prepare but must not yet cede.
 
-## Lifecycle at Signals
+## Lifecycle at Signals — Airflow OBSERVES the activity
 
-| RPC | Airflow |
-|---|---|
-| `DeclareActivity` | trigger a `coord_activity` run; `conf` = the declaration; the run's `hold` task waits (deferrable) until `horizon_iso` |
-| `RenewActivity` | trigger a NEW run with the same `activity_id` and the new horizon; mark the previous run `success` with note `renewed → <run_id>` (state `SUPERSEDED`) |
-| `ReleaseActivity` | mark the current run `success` with note `released by <peer>: <outcome>` (state `RELEASED`) |
-| horizon passes | the run completes on its own → `EXPIRED` |
-| run fails | `FAILED` — intent NOT in force |
-| `ListActivities` | read dag runs (+ conf, note) and coalesce by `activity_id` (latest run wins) |
-| `WatchActivities` | server stream; every event is the FULL in-force set plus recently-ended (≥ 5 min window); emitted on change and at least every 60 s — a silent stream is a dead stream; a client REPLACES its view on every event, absence = ended |
+Airflow's model for external work is a Sensor: the task is RUNNING because the
+process is observed alive, not because someone said so. Signals therefore holds
+a **lease** per activity (heartbeat, horizon, TTL 180 s, released flag) and the
+run's `hold` task is a deferrable **`SignalsActivitySensor`** whose trigger polls
+that lease (through the Signals engine's control HTTP, bridged into the
+cluster) every few seconds. Nobody patches a run's state.
+
+| RPC / event | Signals lease | Airflow |
+|---|---|---|
+| `DeclareActivity` | create lease (heartbeat = now) | trigger ONE run `act-<activity_id>` of the kind's DAG (`coord_interactive_session` → pool `agent_rtc`, 1 slot, deferred-inclusive; other kinds → `coord_activity`); `conf` = declaration + `lease_url`; `declare` emits Asset `zndx.coord.activity` |
+| `RenewActivity` | **heartbeat**: heartbeat = now, horizon = request; no Airflow call, no new run | `hold` keeps deferring |
+| `ReleaseActivity` | released = true, outcome, ended | the trigger observes it → `hold` completes with outcome `released` → `close` emits Asset `zndx.coord.activity.ended` → run `success` → state `RELEASED` |
+| heartbeats stop for the TTL, or the horizon passes | lease **lapsed** | the trigger observes it → outcome `lapsed` → run `success` → state `EXPIRED` |
+| Signals unreachable from the trigger | unknown | the trigger keeps waiting (a dark Signals is not a lapse); the sensor `timeout` (24 h) is the outer net |
+| run fails | — | `FAILED` — intent NOT in force |
+| `ListActivities` | join runs ↔ leases by `activity_id` | run state is the truth; `RELEASED` vs `EXPIRED` read from the lease |
+| `WatchActivities` | | server stream; every event is the FULL in-force set plus recently-ended (≥ 5 min window); emitted on change and at least every 60 s — a silent stream is a dead stream; a client REPLACES its view on every event, absence = ended |
+
+The declarer heartbeats well under the TTL (Hermes: every 60 s) with the horizon
+as the session's outer bound. `ACTIVITY_SUPERSEDED` remains in the vocabulary
+for a scheduler that renews by re-running; Signals does not.
 
 `DeclareActivityRequest.request_id` is idempotent: a retry returns the same
 activity. Unknown peers are refused (`accepted=false`, guru in `error`).
