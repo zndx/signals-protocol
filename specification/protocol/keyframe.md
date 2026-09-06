@@ -65,6 +65,11 @@ workload (one 4090); YuniKorn admits it (`WatchWorkload` / queue share).
 The dashboard only views the resulting frames. The interpolator does not
 run in browser JS and does not import pyluxcore.
 
+A caller MAY instead animate the still with an **off-lattice** image-to-video
+service (Hermes: xAI Grok Imagine via subscription OAuth, not an API key).
+That clip is a replica on the caller’s object plane, not a Gaius product.
+`Render` still returns only the still handle.
+
 ## Hermes plugin
 
 `signals-listen` `plugin_api` is a gRPC **client** of Gaius `:50051`
