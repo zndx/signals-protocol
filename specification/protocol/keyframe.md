@@ -65,10 +65,13 @@ workload (one 4090); YuniKorn admits it (`WatchWorkload` / queue share).
 The dashboard only views the resulting frames. The interpolator does not
 run in browser JS and does not import pyluxcore.
 
-A caller MAY instead animate the still with an **off-lattice** image-to-video
-service (Hermes: xAI Grok Imagine via subscription OAuth, not an API key).
-That clip is a replica on the caller’s object plane, not a Gaius product.
-`Render` still returns only the still handle.
+A caller MAY animate the still with an **off-lattice** image-to-video
+service **only** when that service is billed as a **subscription** (Hermes:
+Grok premium/Heavy `xai-oauth`). **Token-metered API keys are forbidden
+on this path** — if OAuth is absent, interpolate locally on a LIGHT GPU
+and accept the quality delta. The clip is a replica on the caller’s
+object plane, not a Gaius product. `Render` still returns only the still
+handle.
 
 ## Hermes plugin
 
