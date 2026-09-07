@@ -274,6 +274,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_CONTRIBUTIONS = 11;  // a peer's contributions by source and workflow (ProductHint)
   SERVER_QUERY_KIND_ACTIVITIES = 12;     // coordination Activities this engine knows (its own + peers', as learned from Signals)
   SERVER_QUERY_KIND_THOUGHTS = 13;       // recent THOUGHTS of this engine's cognition — content, not counts (added 2026-09-07)
+  SERVER_QUERY_KIND_AGENDA = 14;         // the AGENDA brief (today · tomorrow · the week) + item index; note_id = one item (added 2026-09-07)
 }
 
 message GitRemote {
@@ -389,6 +390,48 @@ message ServerQueryResponse {
   ContributionsHint contributions = 13; // kind=CONTRIBUTIONS (added 2026-08-31, gaius — additive v1.)
   repeated Activity activities = 14;  // kind=ACTIVITIES (added 2026-09-06 — additive v1.)
   ThoughtsHint thoughts_hint = 15;    // kind=THOUGHTS (added 2026-09-07 — additive v1.)
+  AgendaHint agenda_hint = 16;        // kind=AGENDA (added 2026-09-07 — additive v1.)
+}
+
+// ── Agenda (added 2026-09-07 — additive v1) ───────────────────────────────
+//
+// The same paradigm as THOUGHTS, for the project's Agenda: a BRIEF the
+// project's own workflow writes on a cadence — the gist of TODAY, and a
+// judgement of what from TOMORROW and the COMING WEEK matters (sessions by
+// start time, reminders by open checks and pins, briefs by recency) in the
+// operator's timezone, saying plainly when a day is empty — plus the INDEX of
+// the items it covered so a conversational agent can follow up: ask again
+// with `note_id = <item id>` and the response carries that one item in full.
+// Two hops, never one; the project's Agenda notes remain the deep surface.
+message AgendaHintItem {
+  string id = 1;                   // the item's stable id (its note path in the project)
+  int64 starts_ms = 2;             // events: start (0 = undated item)
+  int64 ends_ms = 3;
+  string kind = 4;                 // note | list | event
+  string intent = 5;               // brief | reminder | session
+  string title = 6;
+  string summary = 7;              // ≤ ~300 chars
+  repeated string tags = 8;
+  bool pinned = 9;
+  int32 open_checks = 10;          // reminder lists: unchecked items
+  string with_whom = 11;
+  string body = 12;                // ONLY on a single-item query (note_id set); bounded by the serving engine
+  int64 created_ms = 13;
+  string day = 14;                 // today | tomorrow | week | past | later — the brief's bucket for it
+}
+
+message AgendaHint {
+  string project = 1;
+  string brief = 2;                // written form (Agenda framing, ≤ ~1400 chars)
+  string spoken = 3;               // plain speech for a voice agent (≤ ~800 chars)
+  int64 brief_at_ms = 4;           // 0 = no brief yet (note says when the next one is due)
+  string brief_id = 5;
+  string timezone = 6;             // IANA zone the brief speaks in
+  string today = 7;                // YYYY-MM-DD in that zone, as the brief saw it
+  repeated AgendaHintItem items = 8;   // the index the brief covered (today · tomorrow · week), newest-relevant first
+  AgendaHintItem item = 9;         // the one item asked for (note_id), with body
+  int32 total_in_window = 10;
+  string note = 11;                // honest state: "no brief yet — next at …", "item not found", "agenda empty"
 }
 
 // ── Thoughts (added 2026-09-07 — additive v1) ─────────────────────────────
