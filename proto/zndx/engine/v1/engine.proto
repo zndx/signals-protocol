@@ -425,6 +425,18 @@ message ThoughtsHint {
   int64 window_ms = 5;             // the window the serving engine applied
   int32 cycles_in_window = 6;      // cognition cycles that ran in the window
   string note = 7;                 // honest state: "cognition idle since …", "store empty", …
+  // The Thoughts BRIEF (added 2026-09-07): written by the cognition cycle itself
+  // as part of its normal workflow, in the Agenda Brief framing — what is on the
+  // mind, the lines of thought, the connections, the open questions — so the
+  // answer to "what have you been thinking about?" is ready before the question
+  // arrives. `spoken` is the plain-speech form for a voice agent (no markdown,
+  // no links); `brief` is the written form. Empty = no brief yet (the note says
+  // when the next cycle is due); a peer never invents one.
+  string brief = 8;
+  string spoken = 9;
+  int64 brief_at_ms = 10;
+  string brief_id = 11;
+  int32 brief_thoughts = 12;       // how many thoughts the brief considered
 }
 
 // ── Coordination Activities (added 2026-09-06 — additive v1) ─────────────
