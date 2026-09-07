@@ -183,6 +183,19 @@ agent-rtc from Hermes."
   applied for the scheduled active workflow and no longer. The capacity gate
   judges every assertion.
 
+## Thoughts on the engine face — "what have you been thinking about?"
+
+The day-one question the federation's agents must answer. `ServerQuery
+kind=THOUGHTS` (engine v1, 2026-09-07) returns a `ThoughtsHint`: the serving
+engine's newest persisted thoughts as CONTENT (kind, title, bounded summary
+and excerpt, domains, salience, chain, when), the total in the window, the
+newest thought's time, cycles in the window and an honest `note` ("cognition
+idle: newest thought is N h old", "store empty", store unreachable). Request
+fields `limit`, `since_ms`, `stream` bound it; the serving engine caps limit
+and text. `CognitionHint` (kind=COGNITION) remains the overview. Two hops,
+never one: the Hermes voice loop asks its own engine's `recent_thoughts`
+tool, which asks each peer engine; the peers' KBs remain the deep surface.
+
 ## Capacity invariant (federation responsibility)
 
 Our workloads — coordinated or otherwise — must never demand more guaranteed
