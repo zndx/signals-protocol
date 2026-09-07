@@ -110,6 +110,46 @@ Airflow unreachable is an error, never a local substitute (fail-fast).
   activity past its horizon without release is a Backlog item
   (`EXPECTATION_CATEGORY_COORDINATION`).
 
+## Ordering workloads in Airflow — the claims ARE the queue configuration
+
+User (2026-09-07): "workloads would be ordered within Airflow such that when one
+workload (with its associated YK queue config) is completed then the next
+scheduled workload indicate to our Signals arbiter that it must assert the new
+workload YK queue configuration." The protocol realises that with no new RPC:
+
+1. **An activity's `claims[]` are its workload's YuniKorn queue configuration.**
+   While the activity is RUNNING (its `hold` sensor deferred), Signals asserts
+   the claims into the arbiter as a queue-share intent owned by the activity
+   (floor = `gpu` on `leaf`, priority by kind); when the run ends — released or
+   lapsed — Signals retracts it (zero-floor supersession). The arbiter asserts
+   configuration for whatever Airflow says is in force, and the capacity gate
+   judges every assertion before it reaches YuniKorn. A refused assertion
+   leaves the activity in force in Airflow but is surfaced in `Activity.note`
+   ("queue config REJECTED: …") for peers and the Backlog.
+2. **Any Airflow run can BE an activity.** A scheduled DAG's `declare` task
+   registers itself with Signals (Signals-internal control HTTP: the DAG's own
+   `dag_id`/`run_id`, kind, peer, claims, postures, horizon) — no coordination
+   run is triggered, the scheduled run is the activity; `hold` observes the
+   lease; `close` emits `zndx.coord.<kind>.ended`. Ordering is Airflow's own:
+   tasks in a chain DAG (declare→hold→close per workload), or the next
+   workload's DAG scheduled on the previous kind's ended Asset. Completion of
+   one workload is exactly the event that starts the next and asserts its
+   configuration.
+3. **The owner engine acts on its own activity.** Every engine already watches
+   Signals. When an engine sees an activity with `peer == <me>` and a kind it
+   knows RUNNING, it starts that workload locally (gaius: enqueues the class's
+   scheduled task with the `activity_id`), heartbeats the lease while the work
+   runs (`RenewActivity` well under the TTL), and releases on completion
+   (`ReleaseActivity`, outcome = the task's terminal status). A dead engine
+   stops heartbeating → lapse → the run EXPIRES → the supervisor's Backlog item.
+   Peers still touch nothing but the Signals gRPC port.
+
+Schedules therefore migrate one class at a time: a class becomes an Airflow DAG
+whose runs are activities carrying its queue configuration (first:
+`gaius_article_curate`, extract floor 1, 09:07 UTC), the peer's
+`ServerQuery SCHEDULES` marks it `source: airflow`, and the pg_cron enqueuer for
+it is retired once the Airflow path has proven a run.
+
 ## Capacity invariant (federation responsibility)
 
 Our workloads — coordinated or otherwise — must never demand more guaranteed

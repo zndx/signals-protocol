@@ -383,7 +383,10 @@ message ServerQueryResponse {
 // (ServerQuery kind=ACTIVITIES) and on zndx.supervision.v1 (ActivityEvent).
 //
 // SEMANTICS peers agree on:
-//   claims     — YK leaves the activity occupies (informational; YK admits)
+//   claims     — the workload's YK queue configuration: while the activity is
+//                RUNNING, Signals asserts each claim into the arbiter as a
+//                queue-share intent (floor = gpu on leaf) and retracts it when
+//                the run ends; a refused assertion is surfaced in `note`
 //   precludes  — YK leaf FQNs peers must NOT admit new work into while RUNNING
 //   postures   — "<project>.endpoint.<alias>" → "hold-uptime": that project
 //                cedes the endpoint's intent (no restart chase, no unit recycle)
