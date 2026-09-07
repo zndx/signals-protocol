@@ -285,12 +285,32 @@ message PeerHint {
   string target = 2;    // host:port of the peer's lattice Engine
 }
 
+// A project's WORKLOAD CATALOGUE entry (added fields 2026-09-07 — additive v1).
+// An engine publishes one per scheduled class (ServerQuery kind=SCHEDULES) and
+// SUBMITS the same to Signals (Scheduler/SyncWorkloads). Signals materialises
+// each enabled entry as an Airflow DAG (`airflow_dag_id`) whose runs are
+// Activities: the run's `hold` observes the owner's lease while the owner
+// engine runs the class, and Signals asserts `claims` into the arbiter for the
+// run's duration — the workload's YuniKorn configuration applied exactly while
+// the workload is active. Ordering is Airflow's: `after` names catalogue ids
+// whose ended Asset schedules this one (instead of, or in addition to, `cron`).
+// Metaflow flows, scheduled tasks and the interactive agent-rtc workflow are
+// all catalogue entries; `source` says who runs it and how it is declared.
 message ScheduleHint {
-  string id = 1;
-  string cron = 2;
-  string airflow_dag_id = 3;
-  string source = 4;    // pg_cron | airflow
-  bool enabled = 5;
+  string id = 1;                       // catalogue id, e.g. task.article_curate
+  string cron = 2;                     // schedule (project-local tz); empty = unscheduled (asset- or engine-declared)
+  string airflow_dag_id = 3;           // materialised DAG (Signals assigns <peer>_<kind> when empty)
+  string source = 4;                   // pg_cron | airflow | engine (declared by the engine itself, e.g. interactive_session)
+  bool enabled = 5;                    // false = catalogued but paused in Airflow
+  string kind = 6;                     // activity kind the owner engine starts (article_curate, interactive_session, …)
+  repeated ActivityClaim claims = 7;   // the workload's YK queue configuration while it runs
+  repeated string precludes = 8;       // leaves peers must not admit into while it runs
+  map<string, string> postures = 9;    // "<project>.endpoint.<alias>" → "hold-uptime", …
+  int32 horizon_s = 10;                // outer bound of one run (the sensor's timeout base)
+  repeated string after = 11;          // catalogue ids this workload follows (Asset-scheduled)
+  string timezone = 12;                // IANA tz for `cron` (empty = UTC)
+  string description = 13;             // human, shown in the DAG
+  string runner = 14;                  // metaflow | task | endpoint | interactive — how the owner runs it
 }
 
 message WikiNote {

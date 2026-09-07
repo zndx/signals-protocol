@@ -79,6 +79,17 @@ service Scheduler {
   rpc ReleaseActivity(ReleaseActivityRequest) returns (ActivityResponse);
   rpc ListActivities(ListActivitiesRequest) returns (ListActivitiesResponse);
   rpc WatchActivities(WatchActivitiesRequest) returns (stream ActivityWatchEvent);
+
+  // ── Workload catalogue (engines SUBMIT their scheduled workloads) ───────
+  // Every project's engine submits its catalogue (zndx.engine.v1.ScheduleHint
+  // entries: class, cadence or `after` ordering, claims = YK queue config,
+  // postures, horizon). Signals owns the Airflow that materialises them:
+  // one DAG per enabled entry whose runs are Activities, so the arbiter
+  // applies each workload's configuration to YuniKorn for exactly the
+  // duration of the active run — Metaflow, scheduled task or the interactive
+  // agent-rtc workflow alike. (added 2026-09-07 — additive v1.)
+  rpc SyncWorkloads(SyncWorkloadsRequest) returns (SyncWorkloadsResponse);
+  rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse);
 }
 
 // ── Roots ───────────────────────────────────────────────────────────────
@@ -560,5 +571,47 @@ message WatchActivitiesRequest {
 // 60 s as a heartbeat, so a silent stream is a dead stream.
 message ActivityWatchEvent {
   repeated zndx.engine.v1.Activity activities = 1;
+  int64 observed_ns = 2;
+}
+
+// ── Workload catalogue (added 2026-09-07 — additive v1) ─────────────────
+//
+// A peer ENGINE submits the full catalogue of the workloads it runs; Signals
+// replaces that peer's entries (a `replace` sync is the whole truth for the
+// peer; an entry absent from the sync is retired from Airflow — paused, its
+// history kept). Signals materialises enabled entries as Airflow DAGs
+// (`ScheduleHint.airflow_dag_id`, default "<peer>_<kind>") through its
+// dynamic DAG registry; entries with `after` are Asset-scheduled on the named
+// workloads' ended Assets; entries with `source = engine` are catalogued for
+// visibility but declared by the engine itself (Scheduler/DeclareActivity).
+
+message SyncWorkloadsRequest {
+  string peer = 1;                                  // submitting engine's project
+  repeated zndx.engine.v1.ScheduleHint workloads = 2;
+  bool replace = 3;                                 // true = this is the peer's whole catalogue
+  string engine_build = 4;                          // the submitting engine's revision (for the registry's provenance)
+}
+
+message WorkloadRecord {
+  zndx.engine.v1.ScheduleHint workload = 1;
+  string peer = 2;
+  string dag_id = 3;                                // materialised DAG id ("" for source=engine)
+  int64 synced_ns = 4;
+  string state = 5;                                 // materialized | paused | engine_declared | error
+  string error = 6;
+}
+
+message SyncWorkloadsResponse {
+  bool accepted = 1;
+  repeated WorkloadRecord records = 2;
+  string error = 3;                                 // guru when Signals cannot persist / reach Airflow
+}
+
+message ListWorkloadsRequest {
+  string peer = 1;                                  // empty = all peers
+}
+
+message ListWorkloadsResponse {
+  repeated WorkloadRecord records = 1;
   int64 observed_ns = 2;
 }

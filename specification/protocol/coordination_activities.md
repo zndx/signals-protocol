@@ -150,6 +150,39 @@ whose runs are activities carrying its queue configuration (first:
 `ServerQuery SCHEDULES` marks it `source: airflow`, and the pg_cron enqueuer for
 it is retired once the Airflow path has proven a run.
 
+## The workload catalogue — engines submit, Signals materialises
+
+User (2026-09-07): "With workloads being synced from every project soon, we need
+reliable ordering with associated YK configurations Signals (the engine) can
+pick up and apply to YK for the duration of the scheduled active workflow, be
+it Metaflow or otherwise, including the interactive workflow defined today for
+agent-rtc from Hermes."
+
+- **Submission.** Each engine SUBMITS its catalogue with
+  `Scheduler/SyncWorkloads(peer, workloads[], replace=true)` — one
+  `zndx.engine.v1.ScheduleHint` per workload: catalogue id, kind, `cron` (or
+  none), `after[]` (catalogue ids it follows), `claims[]` (its YuniKorn queue
+  configuration), `precludes[]`, `postures{}`, `horizon_s`, `runner`
+  (metaflow | task | endpoint | interactive), `source` (pg_cron | airflow |
+  engine), `enabled`. The same entries are visible on the engine's own face
+  (`ServerQuery kind=SCHEDULES`). A replace sync is the peer's whole truth:
+  entries absent from it are retired (paused) in Airflow, history kept.
+- **Materialisation.** Signals keeps the federation registry (an Airflow
+  Variable, the Airflow-native store for dynamic DAG generation) and a dynamic
+  DAG module generates one workload DAG per enabled entry (`declare` → `hold` →
+  `close`, `dag_id = airflow_dag_id or "<peer>_<kind>"`): `cron` entries are
+  time-scheduled, `after` entries are **Asset-scheduled** on the named
+  workloads' ended Assets — reliable ordering in Airflow's own terms. Disabled
+  entries materialise paused (the procession is visible before it is live).
+  `source = engine` entries (the interactive agent-rtc workflow) are catalogued
+  for visibility and declared by the engine itself at session start.
+- **Application.** Every run is an Activity: the owner engine starts the class
+  when it sees its own activity in force, heartbeats while it runs, releases on
+  completion; Signals asserts the entry's `claims` into the arbiter for exactly
+  that duration and retires them after — the workload's YuniKorn configuration
+  applied for the scheduled active workflow and no longer. The capacity gate
+  judges every assertion.
+
 ## Capacity invariant (federation responsibility)
 
 Our workloads — coordinated or otherwise — must never demand more guaranteed
