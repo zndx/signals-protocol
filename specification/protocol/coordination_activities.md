@@ -174,6 +174,16 @@ agent-rtc from Hermes."
   time-scheduled, `after` entries are **Asset-scheduled** on the named
   workloads' ended Assets — reliable ordering in Airflow's own terms. Disabled
   entries materialise paused (the procession is visible before it is live).
+  `after_mode` (2026-09-07) says how the named workloads gate the run: `all`
+  (default) waits for every one of them to end since the last run (AssetAll);
+  `any` runs when any one of them ends (AssetAny) — the shape of a **digest**
+  such as a project's agenda brief, recomposed whenever a producer (a publish
+  slot, a prospects update, a cognition cycle, the weekly summary) finishes.
+  With `cron` set as well the schedule is time OR assets
+  (AssetOrTimeSchedule): the digest also rolls over on its clock when nothing
+  was produced. A producer's ended Asset fires only for its Airflow-declared
+  runs, so a digest's producers are enabled entries themselves; a producer
+  still driven by its local scheduler contributes nothing to the trigger.
   `source = engine` entries (the interactive agent-rtc workflow) are catalogued
   for visibility and declared by the engine itself at session start.
 - **Application.** Every run is an Activity: the owner engine starts the class
