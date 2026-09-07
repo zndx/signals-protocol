@@ -273,6 +273,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_COGNITION = 10;      // a peer's cognition overview (thought/cycle buckets)
   SERVER_QUERY_KIND_CONTRIBUTIONS = 11;  // a peer's contributions by source and workflow (ProductHint)
   SERVER_QUERY_KIND_ACTIVITIES = 12;     // coordination Activities this engine knows (its own + peers', as learned from Signals)
+  SERVER_QUERY_KIND_THOUGHTS = 13;       // recent THOUGHTS of this engine's cognition — content, not counts (added 2026-09-07)
 }
 
 message GitRemote {
@@ -367,6 +368,9 @@ message ServerQueryRequest {
   string nonce = 3;
   string origin_project = 4;
   string note_id = 5;
+  int32 limit = 6;        // kind=THOUGHTS: max thoughts (serving engine caps; 0 = its default)
+  int64 since_ms = 7;     // kind=THOUGHTS: only thoughts at or after this unix ms (0 = serving-engine window)
+  string stream = 8;      // kind=THOUGHTS: thought kind filter (pattern | connection | question | reflection | …; "" = all)
 }
 
 message ServerQueryResponse {
@@ -384,6 +388,43 @@ message ServerQueryResponse {
   CognitionHint cognition = 12;       // kind=COGNITION (added 2026-08-31, gaius — additive v1.)
   ContributionsHint contributions = 13; // kind=CONTRIBUTIONS (added 2026-08-31, gaius — additive v1.)
   repeated Activity activities = 14;  // kind=ACTIVITIES (added 2026-09-06 — additive v1.)
+  ThoughtsHint thoughts_hint = 15;    // kind=THOUGHTS (added 2026-09-07 — additive v1.)
+}
+
+// ── Thoughts (added 2026-09-07 — additive v1) ─────────────────────────────
+//
+// "What have you been thinking about?" — the day-one question. CognitionHint
+// (kind=COGNITION) is the overview: counts and buckets. THOUGHTS is the
+// CONTENT: the serving engine's most recent persisted thoughts, bounded and
+// newest first, so a peer's agent (the Hermes voice loop, another project's
+// briefing) can talk about them in its own words. Two hops, never one: a
+// local process asks its local engine, which asks the peer engine. The
+// serving engine caps limit and text lengths; nothing here is a search —
+// the peer's own UI / KB remains the deep surface.
+message Thought {
+  string id = 1;
+  int64 at_ms = 2;                 // when it was thought (created)
+  string kind = 3;                 // thought_type: pattern | connection | question | reflection | audit | …
+  string title = 4;
+  string summary = 5;              // ≤ ~600 chars, the serving engine's own summary
+  string excerpt = 6;              // ≤ ~1200 chars of the content (empty when summary suffices)
+  repeated string domains = 7;     // KB domains / topics it draws on
+  double salience = 8;             // 0..1 as the generator scored it
+  string chain_id = 9;             // thought_chain_id — follow a line of thought
+  int32 generation = 10;           // position in its chain (0 = a root thought)
+  string note_path = 11;           // KB note that persisted it (peer-local path)
+  string profile = 12;             // cognition profile that produced it
+  string model = 13;               // generator model
+}
+
+message ThoughtsHint {
+  string project = 1;
+  repeated Thought thoughts = 2;   // newest first
+  int32 total_in_window = 3;       // how many exist in the window (thoughts[] may be fewer)
+  int64 newest_ms = 4;             // newest thought in the store (0 = none)
+  int64 window_ms = 5;             // the window the serving engine applied
+  int32 cycles_in_window = 6;      // cognition cycles that ran in the window
+  string note = 7;                 // honest state: "cognition idle since …", "store empty", …
 }
 
 // ── Coordination Activities (added 2026-09-06 — additive v1) ─────────────
