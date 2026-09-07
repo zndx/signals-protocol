@@ -110,6 +110,21 @@ Airflow unreachable is an error, never a local substitute (fail-fast).
   activity past its horizon without release is a Backlog item
   (`EXPECTATION_CATEGORY_COORDINATION`).
 
+## Capacity invariant (federation responsibility)
+
+Our workloads — coordinated or otherwise — must never demand more guaranteed
+GPUs than the system physically has. This is the federated engines' own
+responsibility: we push workload configurations into YuniKorn so it can manage
+the queues by our active workloads, and YuniKorn's configuration validation
+checks children against parent maxima but not against node capacity. Signals
+therefore judges every configuration it pushes against the partition's
+physical capacity: Σ leaf guaranteed ≤ physical GPUs (queue-share ingest,
+the applier's shed, `PromoteScratch`, `Scheduler/Health`
+`guaranteed-within-physical`), and an Activity's `claims[]` must fit their
+leaf's declared max, alone and summed with the other in-force activities on
+that leaf (`#CO.00000009.OVERCLAIM`). A peer that asks for more is answered
+REJECTED / refused in-band — never a configuration YuniKorn cannot honour.
+
 ## Non-goals (for now)
 
 Declaring project schedules as Airflow DAGs (`ScheduleHint` → DAG factory),
