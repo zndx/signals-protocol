@@ -313,6 +313,14 @@ message ScheduleHint {
   string timezone = 12;                // IANA tz for `cron` (empty = UTC)
   string description = 13;             // human, shown in the DAG
   string runner = 14;                  // metaflow | task | endpoint | interactive — how the owner runs it
+  // How `after` schedules this workload (added 2026-09-07): "all" (default) =
+  // run when EVERY named workload has ended since the last run (Airflow
+  // AssetAll); "any" = run when ANY one of them ends (AssetAny) — the shape of
+  // a digest such as a project's agenda brief, refreshed whenever a producer
+  // (a publish slot, a prospects update, a cognition cycle) finishes. With
+  // `cron` also set, the schedule is time OR assets (AssetOrTimeSchedule): the
+  // digest rolls over at the day boundary even when nothing was produced.
+  string after_mode = 15;
 }
 
 message WikiNote {
