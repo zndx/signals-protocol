@@ -33,6 +33,9 @@ tokens}` (model layer first when present) — and `fulfilled_by` (e.g.
 `cot_reflection@engine/Qwen3.8-27B@vllm:8081`). A method that cannot recover the
 model layer keeps the method layer and the serving engine logs
 `#EP.00000021.METHODTRACE`. (added 2026-08-30)
+`profile` — the `OperatingProfile` (capability, thinking, `reasoning_effort`) the
+serving engine aligned to; see [capabilities.md](capabilities.md) §Operating profiles.
+(added 2026-09-08)
 
 Errors surface as gRPC status codes; the engine stays up (INTERNAL for serving
 failures, UNAVAILABLE while a capability is cold-loading if the engine chooses not to
@@ -113,6 +116,10 @@ The federation-facing view: `project`, per-capability `Endpoint`
 (`kind`, `url`, `healthy`). `kind=primary` is the product UI a waffle
 lists. Empty `surfaces` means this engine advertises none. Engine-private
 details (internal vLLM ports, log paths) stay absent.
+
+`endpoints[]` lists only capabilities this engine **hosts**. An engine that
+forwards `Complete` to a peer advertises nothing for the forwarded capability
+(capabilities.md §Operating profiles) — empty `endpoints` is honest.
 
 See [`surfaces.md`](surfaces.md) for the peer implementation note.
 

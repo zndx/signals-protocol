@@ -209,6 +209,11 @@ message CompleteResponse {
   // "cot_reflection@engine/Qwen3.8-27B@vllm:8081". Empty on the legacy path.
   // (added 2026-08-30, gaius — additive v1.)
   string fulfilled_by = 10;
+  // The operating profile the serving engine ALIGNED to for this request (the
+  // requested capability's thinking/effort), so a warehouse row can record how the
+  // reasoning layer was produced. Unset on the legacy path.
+  // (added 2026-09-08 — additive v1.)
+  OperatingProfile profile = 11;
 }
 
 message StatusRequest {}
@@ -706,6 +711,24 @@ message WorkloadRequirements {
   KServeTarget      kserve      = 4;  // remote KServe
 }
 
+// ── Operating profiles: how a capability is SERVED on a model (added 2026-09-08 — additive v1) ──
+// "Capabilities, not models" also means capabilities, not call parameters. One resident model
+// serves several MODEL capabilities; each is an OPERATING PROFILE the serving engine ALIGNS its
+// call parameters to when a calling engine names that capability. The caller never names a
+// model or a kwarg; the serving engine reports the profile it applied so warehouse rows
+// (hx_reasoning) keep one structure across capabilities. Vocabulary + rules:
+// specification/protocol/capabilities.md §Operating profiles.
+//   thinking — reasoning on, effort xhigh (the model default)
+//   instruct — reasoning on, effort low: the same model, a brief trace, less overhead
+// An engine that does not HOST the model MUST NOT advertise the capability (Status endpoints,
+// WORKLOADS offers); it forwards Complete to a peer that does, or answers FAILED_PRECONDITION.
+// No silent fallback to another capability.
+message OperatingProfile {
+  string capability = 1;        // the model capability this profile serves (instruct | thinking | …)
+  bool thinking = 2;            // reasoning trace on (Qwen3-class enable_thinking)
+  string reasoning_effort = 3;  // model-defined level while thinking is on (xhigh | medium | low); "" = model default
+  string note = 4;              // human: why this profile exists
+}
 // What a peer currently offers to serve, and what it physically requires.
 // Occupancy (resource_class / queue) is a hint; the caller picks the share at
 // RequestQueueShare. The Signals engine aggregates WorkloadOffers across the
@@ -724,6 +747,11 @@ message WorkloadOffer {
   // planner checks the models × methods mix before routing. Empty list is
   // honest. (added 2026-08-30, gaius — additive v1.)
   repeated string methods = 7;
+  // One OperatingProfile per model capability in `capabilities` this offer serves
+  // (added 2026-09-08 — additive v1). A capability without a profile is served at
+  // the model default — honest, never invented. Discovery only; Complete reports
+  // the profile actually applied.
+  repeated OperatingProfile profiles = 8;
 }
 
 // A leaf this engine needs Signals to have (declared *shape*).
