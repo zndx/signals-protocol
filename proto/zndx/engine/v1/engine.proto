@@ -275,6 +275,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_ACTIVITIES = 12;     // coordination Activities this engine knows (its own + peers', as learned from Signals)
   SERVER_QUERY_KIND_THOUGHTS = 13;       // recent THOUGHTS of this engine's cognition — content, not counts (added 2026-09-07)
   SERVER_QUERY_KIND_AGENDA = 14;         // the AGENDA brief (today · tomorrow · the week) + item index; note_id = one item (added 2026-09-07)
+  SERVER_QUERY_KIND_SEARCH = 15;         // KB and/or web hits; query= the string, stream= kb|web|all (added 2026-09-08)
 }
 
 message GitRemote {
@@ -379,7 +380,8 @@ message ServerQueryRequest {
   string note_id = 5;
   int32 limit = 6;        // kind=THOUGHTS: max thoughts (serving engine caps; 0 = its default)
   int64 since_ms = 7;     // kind=THOUGHTS: only thoughts at or after this unix ms (0 = serving-engine window)
-  string stream = 8;      // kind=THOUGHTS: thought kind filter (pattern | connection | question | reflection | …; "" = all)
+  string stream = 8;      // kind=THOUGHTS: thought kind filter; kind=SEARCH: kb | web | all ("" = all)
+  string query = 9;       // kind=SEARCH: the search string
 }
 
 message ServerQueryResponse {
@@ -399,6 +401,28 @@ message ServerQueryResponse {
   repeated Activity activities = 14;  // kind=ACTIVITIES (added 2026-09-06 — additive v1.)
   ThoughtsHint thoughts_hint = 15;    // kind=THOUGHTS (added 2026-09-07 — additive v1.)
   AgendaHint agenda_hint = 16;        // kind=AGENDA (added 2026-09-07 — additive v1.)
+  SearchHint search_hint = 17;        // kind=SEARCH (added 2026-09-08 — additive v1.)
+}
+
+// ── Search (added 2026-09-08 — additive v1) ───────────────────────────────
+//
+// "Look that up" — KB notes and/or the public web, served by the peer that
+// owns the store (Gaius KB + Brave). Two hops; empty hits plus `note` is
+// honest (key missing, idle, no matches). stream= kb | web | all.
+message SearchHit {
+  string title = 1;
+  string url = 2;          // wiki path (kb) or https (web)
+  string snippet = 3;
+  string source = 4;       // kb | web
+  float score = 5;
+}
+
+message SearchHint {
+  string project = 1;
+  string query = 2;
+  string stream = 3;       // kb | web | all as served
+  repeated SearchHit hits = 4;
+  string note = 5;         // honest state when empty
 }
 
 // ── Agenda (added 2026-09-07 — additive v1) ───────────────────────────────
