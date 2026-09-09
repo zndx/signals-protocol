@@ -281,6 +281,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_THOUGHTS = 13;       // recent THOUGHTS of this engine's cognition — content, not counts (added 2026-09-07)
   SERVER_QUERY_KIND_AGENDA = 14;         // the AGENDA brief (today · tomorrow · the week) + item index; note_id = one item (added 2026-09-07)
   SERVER_QUERY_KIND_SEARCH = 15;         // KB and/or web hits; query= the string, stream= kb|web|all (added 2026-09-08)
+  SERVER_QUERY_KIND_AGENTS = 16;         // agents this engine HOSTS (AgentHint[]); full offers: zndx.agent.v1.Agents/ListAgents (added 2026-09-09)
 }
 
 message GitRemote {
@@ -407,6 +408,23 @@ message ServerQueryResponse {
   ThoughtsHint thoughts_hint = 15;    // kind=THOUGHTS (added 2026-09-07 — additive v1.)
   AgendaHint agenda_hint = 16;        // kind=AGENDA (added 2026-09-07 — additive v1.)
   SearchHint search_hint = 17;        // kind=SEARCH (added 2026-09-08 — additive v1.)
+  repeated AgentHint agents = 18;     // kind=AGENTS (added 2026-09-09 — additive v1.)
+}
+
+// ── Agents (added 2026-09-09 — additive v1) ───────────────────────────────
+//
+// DISCOVERY of the agents a peer HOSTS — the bounded assemblages (runtime + tools +
+// workspace + the model capability they think with) that zndx.agent.v1 runs. Light on
+// purpose: zndx.agent.v1.Agents/ListAgents is the full offer. An engine that does not
+// host an agent MUST NOT list it. Empty is honest.
+message AgentHint {
+  string agent_id = 1;                    // {project}/{name}@{version}
+  string project = 2;
+  string name = 3;
+  string version = 4;
+  string transport = 5;                   // acp | sdk | cli | engine (zndx.agent.v1.AgentTransport, as text)
+  repeated string model_capabilities = 6; // what it can think with; empty = brings its own model
+  string billing = 7;                     // local | subscription | token-metered
 }
 
 // ── Search (added 2026-09-08 — additive v1) ───────────────────────────────

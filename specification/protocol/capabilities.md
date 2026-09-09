@@ -60,6 +60,15 @@ Rules:
 Reference: Gaius serves both profiles on its `thinking` endpoint; Ægir hosts
 no model and forwards (`src/aegir/engine/forwarder.py`).
 
+## Agent capabilities (2026-09-09)
+
+The third class. An **agent** is the bounded assemblage — runtime, behaviours and tools,
+workspace, and the model capability it thinks with — that takes an instruction and returns a
+result with a trajectory. Agents are not `Complete` capabilities: they have their own service,
+`zndx.agent.v1.Agents`, and are discovered by `ServerQuery kind=AGENTS` / `ListAgents`. See
+[agent_grpc.md](agent_grpc.md). An agent's `model_capability` is one of the model capabilities
+above, aligned to its operating profile by the serving engine.
+
 ## Method capabilities
 
 Method capabilities name an optillm technique class. `WorkloadOffer.methods`

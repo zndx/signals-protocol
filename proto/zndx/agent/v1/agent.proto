@@ -1,0 +1,286 @@
+// zndx.agent.v1 — AGENTS as federation capabilities (added 2026-09-09 — v1 draft, additive).
+//
+// VOCABULARY (Holland, Signals & Boundaries; JADE / FIPA): an AGENT is the bounded assemblage —
+// a runtime, its behaviours and tools, a workspace, and the model capability it thinks with —
+// that receives an instruction across its boundary, acts, and returns a result. The runtime
+// (ACP process, SDK loop, CLI) is the platform's business — JADE: the middleware "deals with all
+// those aspects that are not peculiar of the agent internals" — and the model is a
+// zndx.engine.v1 capability served under an operating profile. Neither is the noun; the agent
+// is. Harbor's `--agent` names the same thing; Harbor's `--model` is our model capability.
+//
+// THREE CAPABILITY CLASSES now exist in the federation:
+//   MODEL  — thinking / instruct / … (zndx.engine.v1, operating profiles)
+//   METHOD — optillm technique classes (zndx.engine.v1 Complete.capabilities[])
+//   AGENT  — this package. A run is a SESSION with tools and a deliverable, never a one-shot
+//            Complete — hence its own service beside Engine on the lattice port.
+//
+// RULES (the operating-profile rules, carried over):
+//   * the engine that HOSTS an agent runs it and never exposes the agent's own transport
+//     (ACP stdio, SDK handles, CLI) across this boundary — a caller sees signals, not plumbing;
+//   * an engine that does not host an agent MUST NOT advertise it (ListAgents / ServerQuery
+//     AGENTS); no silent fallback from one agent to another;
+//   * a run is a coordination Activity (kind agent_run) whose claims are the driven model's
+//     leaf, so YuniKorn and Airflow see it; horizon = the budget;
+//   * the trajectory is a federation data product (ATIF — Agent Trajectory Interchange Format,
+//     as Harbor writes it) on the Signals object plane, one hx_reasoning row per turn; reasoning
+//     layers are RETAINED — corpus value-adds, never dropped;
+//   * token-metered billing MUST be advertised (AgentOffer.billing) so callers can refuse it
+//     (the keyframe.md rule generalised).
+// Additive-only within v1. Spec: specification/protocol/agent_grpc.md.
+syntax = "proto3";
+
+package zndx.agent.v1;
+
+import "zndx/engine/v1/engine.proto";
+
+// Registered BESIDE zndx.engine.v1.Engine on an engine's lattice port (multi-service gRPC),
+// by engines that host at least one agent. Reflection MUST advertise it there.
+service Agents {
+  // Yellow pages (JADE DF): the agents THIS engine hosts, with what each can think with and
+  // what a caller may hand it. Empty is honest. Cross-federation discovery walks peers
+  // (ServerQuery PEERS) and asks each — or reads the light AgentHint via
+  // Engine/ServerQuery kind=AGENTS.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  // Run an agent on an instruction: the request crosses the boundary, the stream is every
+  // signal that comes back out (thoughts, messages, tool calls, deliverables, done). The
+  // hosting engine declares the Activity, resolves the model capability (aligning its
+  // operating profile), drives the runtime, writes the trajectory product, releases.
+  rpc Run(RunRequest) returns (stream AgentEvent);
+  // Stop a run before its horizon (releases its Activity). Idempotent on a finished run.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  // The record of a run — state, usage, trajectory handle — for callers that were not
+  // holding the stream (a supervisor, a later audit).
+  rpc GetRun(GetRunRequest) returns (RunRecord);
+}
+
+// How the HOSTING engine drives the agent. Advertised as a KIND only — the concrete
+// command, ports and handles are engine-private.
+enum AgentTransport {
+  AGENT_TRANSPORT_UNSPECIFIED = 0;
+  AGENT_TRANSPORT_ACP = 1;     // Agent Client Protocol over stdio (vibe-acp, grok agent stdio, metabot, Harbor acp:*)
+  AGENT_TRANSPORT_SDK = 2;     // in-process SDK loop (claude-agent-sdk, hsengine)
+  AGENT_TRANSPORT_CLI = 3;     // an installed CLI the engine drives (Harbor installed agents)
+  AGENT_TRANSPORT_ENGINE = 4;  // the engine's own loop (Gaius cognition)
+}
+
+// Tool transports an agent accepts from a CALLER. Cross-host is HTTP/SSE only; stdio tool
+// servers are same-host and an engine may refuse them.
+enum McpTransport {
+  MCP_TRANSPORT_UNSPECIFIED = 0;
+  MCP_TRANSPORT_HTTP = 1;
+  MCP_TRANSPORT_STDIO = 2;
+}
+
+// Who pays for the agent's thinking. Callers MAY refuse TOKEN_METERED (subscription and local
+// are the federation's preferred paths — keyframe.md).
+enum Billing {
+  BILLING_UNSPECIFIED = 0;
+  BILLING_LOCAL = 1;          // thinks with a federation model capability (GPU tokens, no money)
+  BILLING_SUBSCRIPTION = 2;   // a flat-rate subscription runtime (Grok Build, Claude Code with OAuth)
+  BILLING_TOKEN_METERED = 3;  // pay-per-token API keys
+}
+
+// One agent this engine hosts (the DF service description). agent_id is the AID:
+// "{project}/{name}@{version}", stable across runs.
+message AgentOffer {
+  string agent_id = 1;                       // aegir/vibe-acp@2.17.1
+  string project = 2;                        // hosting engine's project
+  string name = 3;                           // vibe-acp | grok-build | claude-agent-sdk | metabot | hermes | terminus-2 | …
+  string version = 4;
+  AgentTransport transport = 5;
+  // Model capabilities this agent can think with (instruct | thinking | …). The hosting engine
+  // resolves the capability to a serving peer and the SERVING engine aligns the operating
+  // profile. Empty = the agent brings its own model (a subscription runtime).
+  repeated string model_capabilities = 6;
+  repeated McpTransport mcp = 7;             // tool transports a caller may hand it
+  bool workspace = 8;                        // reads inputs from / writes deliverables to RunRequest.workspace_uri
+  repeated string behaviours = 9;            // built-in tools / skills it brings (kvasir-ddl-check, shell, web, …) — informative
+  string kwargs_schema_json = 10;            // JSON Schema for RunRequest.kwargs_json (Harbor `agent schema`); "" = none
+  Billing billing = 11;
+  string note = 12;                          // human: what this agent is for
+}
+
+message ListAgentsRequest {}
+
+message ListAgentsResponse {
+  string project = 1;
+  repeated AgentOffer agents = 2;
+}
+
+// A tool server the CALLER exposes to the agent — the membrane doctrine: the caller owns the
+// tools so the agent can check but never fake. Exactly one of url / command.
+message McpServerRef {
+  string name = 1;
+  McpTransport transport = 2;
+  string url = 3;                            // HTTP/SSE endpoint (the cross-host form)
+  string command = 4;                        // stdio form — same host only
+  repeated string args = 5;
+  map<string, string> env = 6;
+  string description = 7;
+}
+
+// Bounds on one run. Zero = the hosting engine's default. The Activity horizon derives from
+// max_seconds.
+message RunBudget {
+  int32 max_turns = 1;
+  int64 max_tokens = 2;
+  int32 max_seconds = 3;
+}
+
+message RunRequest {
+  string agent = 1;                          // AgentOffer.name or agent_id (Harbor --agent); "" = INVALID_ARGUMENT
+  // The model capability the agent thinks with (Harbor --model): a zndx.engine.v1 model
+  // capability (instruct | thinking | …). The hosting engine resolves it (its own or a peer's
+  // serving endpoint) and the serving engine aligns the operating profile. "" = the agent's
+  // default; a capability the agent cannot think with is FAILED_PRECONDITION.
+  string model_capability = 2;
+  // Optional METHOD capability (an optillm technique class) applied to every Complete the
+  // agent makes — the engine.v1 dual-constraint conjunction, agent-wide. Empty = none.
+  string method_capability = 3;
+  string instruction = 4;                    // the task
+  string system_prompt = 5;                  // optional; agents with a fixed persona may ignore it (say so in note)
+  // Object-plane prefix the run reads inputs from and writes deliverables to, e.g.
+  // s3://signals-dataproducts/{peer}/agent/{run_id}/ (data_products.md). "" = ephemeral
+  // workspace inside the hosting engine; deliverables then travel only as Deliverable events.
+  string workspace_uri = 6;
+  repeated McpServerRef mcp_servers = 7;     // caller-owned tools
+  string kwargs_json = 8;                    // agent-specific options (Harbor --ak); validated against kwargs_schema_json
+  RunBudget budget = 9;
+  string run_id = 10;                        // UUIDv7, caller-minted; idempotent — a retry attaches to the same run. "" = engine mints
+  string tx_id = 11;                         // warehouse epoch for the run's products (UUIDv7); "" = engine mints
+  string reason = 12;                        // human: why this run exists (becomes the Activity reason)
+  string timezone = 13;                      // as Complete
+  string clock_json = 14;                    // as Complete
+}
+
+enum RunState {
+  RUN_STATE_UNSPECIFIED = 0;
+  RUN_QUEUED = 1;               // accepted; Activity declared; waiting for admission or the runtime
+  RUN_RUNNING = 2;
+  RUN_COMPLETED = 3;
+  RUN_FAILED = 4;
+  RUN_CANCELLED = 5;
+  RUN_BUDGET_EXHAUSTED = 6;
+}
+
+// First event on every stream: what the boundary resolved.
+message RunAccepted {
+  string run_id = 1;
+  string agent_id = 2;
+  string model = 3;                          // the model actually thinking (as the serving engine reports it)
+  string model_peer = 4;                     // project serving the model capability (may be this engine)
+  zndx.engine.v1.OperatingProfile profile = 5;  // the aligned operating profile
+  string activity_id = 6;                    // the coordination Activity carrying the run
+  string workspace_uri = 7;                  // effective workspace (minted if the request left it empty)
+}
+
+// A visible turn of the agent (assistant text, or a user/tool-role message the agent injected).
+message Message {
+  int32 turn = 1;
+  string role = 2;                           // assistant | user | tool
+  string text = 3;
+}
+
+message ToolCall {
+  int32 turn = 1;
+  string call_id = 2;
+  string name = 3;
+  string arguments_json = 4;
+  string server = 5;                         // McpServerRef.name, or "" for a built-in behaviour
+}
+
+message ToolResult {
+  int32 turn = 1;
+  string call_id = 2;
+  string content = 3;                        // bounded by the hosting engine; the trajectory keeps the full text
+  bool is_error = 4;
+  int32 latency_ms = 5;
+}
+
+// An artifact the agent wrote. uri is on the object plane (or "" when ephemeral and the bytes
+// are inline in `inline` — small only). product_id when the artifact is a registered product.
+message Deliverable {
+  int32 turn = 1;
+  string uri = 2;
+  string content_type = 3;
+  int64 bytes = 4;
+  string sha256 = 5;
+  string product_id = 6;
+  bytes inline = 7;                          // ≤ 256 KiB; empty when uri is set
+  string note = 8;
+}
+
+// A position report for supervision (zndx.supervision.v1 Position vocabulary): the hosting
+// engine emits one per phase/step transition so a run is never silent while working.
+message Progress {
+  string phase = 1;
+  string step = 2;
+  int32 turn = 3;
+  string detail = 4;
+}
+
+message Usage {
+  int32 turns = 1;
+  int64 prompt_tokens = 2;
+  int64 completion_tokens = 3;
+  int32 tool_calls = 4;
+  int64 wall_ms = 5;
+}
+
+// Last event on every stream.
+message RunDone {
+  RunState state = 1;
+  string stop_reason = 2;                    // end_turn | max_turns | max_tokens | max_seconds | cancelled | error | refusal
+  string result_text = 3;                    // the agent's final answer / summary
+  Usage usage = 4;
+  string trajectory_uri = 5;                 // the ATIF document on the object plane
+  string trajectory_format = 6;              // "atif" (+ version, e.g. "atif/1.0")
+  string trajectory_product_id = 7;          // {peer}.agent.trajectories
+  string error = 8;                          // guru when state is FAILED
+}
+
+// Every signal that crosses the boundary back to the caller. seq is a per-run gap detector;
+// at_unix_ms is the SOURCE time (supervision convention) so replay and live sort identically.
+message AgentEvent {
+  string run_id = 1;
+  uint64 seq = 2;
+  int64 at_unix_ms = 3;
+  oneof event {
+    RunAccepted accepted = 10;
+    zndx.engine.v1.ReasoningLayer thought = 11;   // layer = "model" (the mind's trace) | "agent" (the runtime's scaffold); RETAINED
+    Message message = 12;
+    ToolCall tool_call = 13;
+    ToolResult tool_result = 14;
+    Deliverable deliverable = 15;
+    Progress progress = 16;
+    RunDone done = 17;
+  }
+}
+
+message CancelRequest {
+  string run_id = 1;
+  string reason = 2;
+}
+
+message CancelResponse {
+  bool accepted = 1;
+  RunState state = 2;
+  string error = 3;
+}
+
+message GetRunRequest {
+  string run_id = 1;
+}
+
+message RunRecord {
+  string run_id = 1;
+  string agent_id = 2;
+  RunState state = 3;
+  int64 started_unix_ms = 4;
+  int64 ended_unix_ms = 5;
+  Usage usage = 6;
+  string trajectory_uri = 7;
+  string activity_id = 8;
+  string tx_id = 9;
+  string error = 10;
+}
