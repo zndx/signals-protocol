@@ -191,7 +191,10 @@ agent-rtc from Hermes."
   completion; Signals asserts the entry's `claims` into the arbiter for exactly
   that duration and retires them after — the workload's YuniKorn configuration
   applied for the scheduled active workflow and no longer. The capacity gate
-  judges every assertion.
+  judges every assertion. **Skip is a fail.** `ReleaseActivity` with owner
+  outcome `skipped:` / `failed:` / `error:` / `stalled:` is `#CO.0000000F.NOEFFECT`
+  — the Airflow DAG must not succeed. Success is the intended real-world
+  effect, not a released lease.
 
 ## Thoughts on the engine face — "what have you been thinking about?"
 
