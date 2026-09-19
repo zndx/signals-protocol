@@ -110,6 +110,16 @@ epidemic gossip. Not CZMQ zgossip. Older engines: `UNIMPLEMENTED`.
 
 Do not invent remotes, peers, or UI URLs. Empty is honest.
 
+## PutAgendaItem
+
+Write one Agenda item onto the engine that **holds** the Agenda (Gaius).
+Hermes, Metabase, and other engines answer `UNIMPLEMENTED`. The caller names
+itself (`origin_project=hermes`) and the named profile or hosted agent
+(`origin_agent=ripley` | `grok` | `metabot`). Gaius assigns the scratch path
+when `item.id` is empty. `session_prompt` / `session_materials` are optional
+and distinct from speaker notes. Stored `origin_project` is `gaius` (the
+holder); `origin_agent` is who asked.
+
 ## Status
 
 The federation-facing view: `project`, per-capability `Endpoint`

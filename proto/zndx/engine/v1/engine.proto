@@ -68,6 +68,12 @@ service Engine {
   // are not a directory answer UNIMPLEMENTED (honest).
   // (added 2026-09-04, aegir — additive v1.)
   rpc Announce(PeerAnnounce) returns (AnnounceAck);
+  // Create (or refresh) one Agenda item on the engine that HOLDS the Agenda
+  // (Gaius). Other engines answer UNIMPLEMENTED. The caller is a lattice
+  // engine + named agent/profile (Hermes Ripley, Hermes Grok, Metabase Metabot).
+  // Gaius writes the zettel; origin_project on the stored item is `gaius`.
+  // origin_agent records who asked. (added 2026-09-19 — additive v1.)
+  rpc PutAgendaItem(PutAgendaItemRequest) returns (PutAgendaItemResponse);
 }
 
 // The KIND of adaptive pressure a boundary detected. Additive-only: new kinds get new numbers.
@@ -487,6 +493,9 @@ message AgendaHintItem {
   // Supporting notes for the voice session, not the deck / speaker_notes /
   // public lede. Empty is honest. (added 2026-09-19 — additive v1.)
   string session_materials = 17;
+  // Named agent/profile that asked Gaius to create this item (`ripley`,
+  // `grok`, `metabot`, `hermes`, …). Empty = unattributed. (added 2026-09-19.)
+  string origin_agent = 18;
 }
 
 message AgendaHint {
@@ -501,6 +510,19 @@ message AgendaHint {
   AgendaHintItem item = 9;         // the one item asked for (note_id), with body
   int32 total_in_window = 10;
   string note = 11;                // honest state: "no brief yet — next at …", "item not found", "agenda empty"
+}
+
+// PutAgendaItem — write one item onto the Agenda holder (Gaius). Additive v1 2026-09-19.
+message PutAgendaItemRequest {
+  string origin_project = 1;       // caller engine: hermes | metabase | gaius
+  string origin_agent = 2;         // named profile/agent: ripley | grok | metabot | hermes
+  AgendaHintItem item = 3;         // title required; id empty = Gaius assigns scratch path
+}
+
+message PutAgendaItemResponse {
+  bool ok = 1;
+  AgendaHintItem item = 2;         // as stored (id = note path)
+  string note = 3;                 // guru on failure; empty on success
 }
 
 // ── Thoughts (added 2026-09-07 — additive v1) ─────────────────────────────
