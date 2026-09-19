@@ -106,19 +106,22 @@ epidemic gossip. Not CZMQ zgossip. Older engines: `UNIMPLEMENTED`.
 | `SURFACES` | this engine's advertised `Surface` list |
 | `QUEUES` | `QueueHint[]` — **declared leaf shape** (path, max, default guarantee). Time-varying occupancy floors are `zndx.scheduler.v1.Scheduler/RequestQueueShare`, not this snapshot. Peers never call scheduler-backend REST. |
 | `WORKLOADS` | `WorkloadHint[]` — WRK `model`, `capabilities`, `tensor_parallel` / `pipeline_parallel`, `gpu_tokens`. Never encode those in the queue name; pick heavy/medium/light (or extract/compute) from `gpu_tokens`. |
-| `AGENDA` | `AgendaHint` — brief + item index; `note_id` = one item in full. On a single-item query the owning **engine** fills `origin_project` (`gaius`, `metabase`, … — Metabase holds Metabot), optional `session_prompt` (novel AgentRTC invent prompt, not speaker notes), and optional `session_materials`. Empty prompt = the caller uses its default opening. Route follow-ups to that engine via `PEERS` (and `AGENTS` if only the hosted-agent name is known), not the first peer that answered. |
+| `AGENDA` | `AgendaHint` — calendar row only (title, times, public lede, `origin_project`, `origin_agent`). `note_id` = one item. Session materials are **not** here. |
+| `RESOURCES` | `ResourcesHint` — Connect-time only. `note_id` = agenda item id. Ask the **origin** engine (`origin_project=hermes` when Ripley created it). Objects live at rustfs `s3://<project>/resources/<note_id>/`. Empty is honest. |
 
 Do not invent remotes, peers, or UI URLs. Empty is honest.
 
 ## PutAgendaItem
 
-Write one Agenda item onto the engine that **holds** the Agenda (Gaius).
-Hermes, Metabase, and other engines answer `UNIMPLEMENTED`. The caller names
-itself (`origin_project=hermes`) and the named profile or hosted agent
-(`origin_agent=ripley` | `grok` | `metabot`). Gaius assigns the scratch path
-when `item.id` is empty. `session_prompt` / `session_materials` are optional
-and distinct from speaker notes. Stored `origin_project` is `gaius` (the
-holder); `origin_agent` is who asked.
+Write one **calendar** item onto the engine that **holds** the Agenda (Gaius).
+Hermes answers `UNIMPLEMENTED` for this RPC and calls Gaius. The caller names
+itself (`origin_project=hermes`) and the named profile (`origin_agent=ripley`
+| `grok`). Gaius stores those origin fields and assigns the scratch path when
+`item.id` is empty. Required agenda fields (title; session needs starts) plus
+any optional public lede/tags go in the zettel. Session prompt and supporting
+materials do **not** go in this RPC — the origin engine writes them to rustfs
+`s3://<origin_project>/resources/<item.id>/` and Connect fetches them with
+`ServerQuery RESOURCES` against that origin.
 
 ## Status
 

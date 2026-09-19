@@ -71,8 +71,10 @@ service Engine {
   // Create (or refresh) one Agenda item on the engine that HOLDS the Agenda
   // (Gaius). Other engines answer UNIMPLEMENTED. The caller is a lattice
   // engine + named agent/profile (Hermes Ripley, Hermes Grok, Metabase Metabot).
-  // Gaius writes the zettel; origin_project on the stored item is `gaius`.
-  // origin_agent records who asked. (added 2026-09-19 — additive v1.)
+  // Gaius writes the calendar zettel only. origin_project is the CALLER
+  // engine (hermes when Ripley/Grok create). Session materials are NOT in
+  // this RPC — they live in origin object storage and are fetched at
+  // Connect via ServerQuery RESOURCES. (added 2026-09-19 — additive v1.)
   rpc PutAgendaItem(PutAgendaItemRequest) returns (PutAgendaItemResponse);
 }
 
@@ -288,6 +290,9 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_AGENDA = 14;         // the AGENDA brief (today · tomorrow · the week) + item index; note_id = one item (added 2026-09-07)
   SERVER_QUERY_KIND_SEARCH = 15;         // KB and/or web hits; query= the string, stream= kb|web|all (added 2026-09-08)
   SERVER_QUERY_KIND_AGENTS = 16;         // agents this engine HOSTS (AgentHint[]); full offers: zndx.agent.v1.Agents/ListAgents (added 2026-09-09)
+  // 17 is AGENTS on the FMP-bearing tree (FMP=16, AGENTS=17). Skip so RESOURCES
+  // is 18 on both trees.
+  SERVER_QUERY_KIND_RESOURCES = 18;      // origin-project session materials (rustfs /<project>/resources/<note_id>/). note_id = agenda item id. Connect-time only. (added 2026-09-19)
 }
 
 message GitRemote {
@@ -415,6 +420,7 @@ message ServerQueryResponse {
   AgendaHint agenda_hint = 16;        // kind=AGENDA (added 2026-09-07 — additive v1.)
   SearchHint search_hint = 17;        // kind=SEARCH (added 2026-09-08 — additive v1.)
   repeated AgentHint agents = 18;     // kind=AGENTS (added 2026-09-09 — additive v1.)
+  ResourcesHint resources_hint = 20;  // kind=RESOURCES (added 2026-09-19 — additive v1; 19 skipped: AGENTS is 19 on the FMP-bearing tree)
 }
 
 // ── Agents (added 2026-09-09 — additive v1) ───────────────────────────────
@@ -523,6 +529,22 @@ message PutAgendaItemResponse {
   bool ok = 1;
   AgendaHintItem item = 2;         // as stored (id = note path)
   string note = 3;                 // guru on failure; empty on success
+}
+
+// Connect-time session materials from the ORIGIN engine's object store
+// (rustfs `s3://<project>/resources/<note_id>/…`). Not the Agenda zettel.
+// Empty objects + note is honest. (added 2026-09-19 — additive v1.)
+message ResourceObject {
+  string name = 1;                 // prompt.md | materials.md | …
+  string text = 2;                 // utf-8 body when the object is text
+  string uri = 3;                  // s3://hermes/resources/<id>/prompt.md
+}
+
+message ResourcesHint {
+  string project = 1;
+  string note_id = 2;              // agenda item id (Gaius scratch path)
+  repeated ResourceObject objects = 3;
+  string note = 4;                 // honest empty
 }
 
 // ── Thoughts (added 2026-09-07 — additive v1) ─────────────────────────────
