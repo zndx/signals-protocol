@@ -473,6 +473,19 @@ message AgendaHintItem {
   string body = 12;                // ONLY on a single-item query (note_id set); bounded by the serving engine
   int64 created_ms = 13;
   string day = 14;                 // today | tomorrow | week | past | later — the brief's bucket for it
+  // Who authored/owns this item (gaius, metabot, …). AgentRTC Connect
+  // ServerQuerys THAT peer for session_prompt / session_materials rather
+  // than assuming the first answering engine. Empty = serving `AgendaHint.project`.
+  // (added 2026-09-19 — additive v1.)
+  string origin_project = 15;
+  // Optional novel prompt for an AgentRTC Connect invent pass. Distinct from
+  // body, presenterm deck, and speaker notes. Empty = the caller uses its
+  // default calendar-session opening. Filled by the owning workflow when it
+  // has one. (added 2026-09-19 — additive v1.)
+  string session_prompt = 16;
+  // Supporting notes for the voice session, not the deck / speaker_notes /
+  // public lede. Empty is honest. (added 2026-09-19 — additive v1.)
+  string session_materials = 17;
 }
 
 message AgendaHint {

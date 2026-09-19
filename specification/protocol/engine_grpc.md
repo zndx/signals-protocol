@@ -106,6 +106,7 @@ epidemic gossip. Not CZMQ zgossip. Older engines: `UNIMPLEMENTED`.
 | `SURFACES` | this engine's advertised `Surface` list |
 | `QUEUES` | `QueueHint[]` — **declared leaf shape** (path, max, default guarantee). Time-varying occupancy floors are `zndx.scheduler.v1.Scheduler/RequestQueueShare`, not this snapshot. Peers never call scheduler-backend REST. |
 | `WORKLOADS` | `WorkloadHint[]` — WRK `model`, `capabilities`, `tensor_parallel` / `pipeline_parallel`, `gpu_tokens`. Never encode those in the queue name; pick heavy/medium/light (or extract/compute) from `gpu_tokens`. |
+| `AGENDA` | `AgendaHint` — brief + item index; `note_id` = one item in full. On a single-item query the owner fills `origin_project`, optional `session_prompt` (novel AgentRTC invent prompt, not speaker notes), and optional `session_materials`. Empty prompt = the caller uses its default opening. Route follow-ups to `origin_project` via `PEERS`, not the first engine that answered. |
 
 Do not invent remotes, peers, or UI URLs. Empty is honest.
 
