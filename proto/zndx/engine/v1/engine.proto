@@ -473,9 +473,10 @@ message AgendaHintItem {
   string body = 12;                // ONLY on a single-item query (note_id set); bounded by the serving engine
   int64 created_ms = 13;
   string day = 14;                 // today | tomorrow | week | past | later — the brief's bucket for it
-  // Who authored/owns this item (gaius, metabot, …). AgentRTC Connect
-  // ServerQuerys THAT peer for session_prompt / session_materials rather
-  // than assuming the first answering engine. Empty = serving `AgendaHint.project`.
+  // Hosting lattice engine (`gaius`, `metabase`, …) — not the agent name.
+  // Metabase holds Metabot; origin_project is `metabase`. AgentRTC Connect
+  // ServerQuerys THAT engine for session_prompt / session_materials rather
+  // than assuming the first answering peer. Empty = serving `AgendaHint.project`.
   // (added 2026-09-19 — additive v1.)
   string origin_project = 15;
   // Optional novel prompt for an AgentRTC Connect invent pass. Distinct from
