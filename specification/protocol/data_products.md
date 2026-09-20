@@ -140,3 +140,103 @@ every subject and every run, and the path
 Reference implementation: Gaius `gaius.curation.cot_reasoning`
 (`src/gaius/hx/cot_reasoning.py`, `src/gaius/flows/article_curation/publish.py`,
 `src/gaius/engine/s2s.py::declared_products`).
+
+## Aspects (SHACL Core, additive 2026-09-20)
+
+A Data Product is a **concrete instance**. An **Aspect** is a reusable
+semantic contract — a [SHACL Core](https://www.w3.org/TR/shacl/)
+`NodeShape` — not a product:
+
+\[
+A \cap P = \varnothing
+\]
+
+| Layer | SHACL | Wire | Warehouse |
+|-------|--------|------|-----------|
+| Aspect specification | `sh:NodeShape` | `AspectSpec.shape` (`shape.id` = `signals.aspect.*`) | facts on catalog instance `signals.aspects.catalog` |
+| Product specification | `sh:NodeShape` whose `sh:and` lists required aspects | `ProductSpec.shape` (`shape.id` = `signals.spec.*`) | `spec.<id>.requires.<aspect_id>` |
+| Product instance | focus node | `ProductHint` + `AspectBinding[]` | `product_id` details / tx / hx |
+
+The aspect catalog is the **shapes graph**. The warehouse projection of
+one `product_id` (latest `details` asserts) is the **data graph**.
+Validation produces a `ValidationReport` (`conforms`, `result[]`) on
+each `AspectBinding`. Claim ≠ proof: `hx_reasoning` quality / lineage /
+delta remains the ACP observation; evidence URIs live on `details`
+(`aspect.<id>.evidence`).
+
+This is **SHACL Core only** (Rec §§2–4). No `sh:sparql`, no
+`sh:entailment`, no RDF store on the wire. v1 `PropertyPath` is a
+**predicate path**. Attribute names are IRIs under
+`https://signals.zndx.org/ns/dp#` (or the `details.a` local name).
+`optional int32 max_count` so `0` is a real upper bound, not proto3
+default-unset.
+
+Do not mint `product_id`s for aspects. `signals.aspects.catalog` **is**
+a product (it inventories shapes); the shapes it describes are not.
+
+### Catalog (Signals-owned)
+
+Architecture-neutral names. v1 **enforces** property constraints only
+on `signals.spec.session` and on warehouse-product bindings already
+fillable from existing facts (`peer`, `title`, `data_uri`, `flow`).
+
+| `aspect_id` | Intent |
+|-------------|--------|
+| `signals.aspect.identifiable` | stable id, title, owner, version |
+| `signals.aspect.discoverable` | description, tags, catalog visibility |
+| `signals.aspect.contracted_interface` | what consumers may rely on |
+| `signals.aspect.accessible` | how approved consumers obtain it |
+| `signals.aspect.quality_assured` | fitness + evidence |
+| `signals.aspect.observable` | freshness, lineage, incidents |
+| `signals.aspect.governed` | roles, classification, retention |
+| `signals.aspect.interoperable` | shared concepts, encodings |
+| `signals.aspect.lifecycle_managed` | maturity, sunset |
+| `signals.aspect.provenanced` | inputs, transforms, activity |
+| `signals.aspect.cost_transparent` | quotas / economics when relevant |
+| `signals.aspect.risk_managed` | continuity, restrictions |
+| `signals.aspect.prepared_session_materials` | session **input**; immutable from the session’s POV |
+| `signals.aspect.transcript` | session **output**; `in_force` then `sealed` |
+| `signals.aspect.can_have_attachment` | invite capability; **upper bound** |
+
+| `spec_id` | `shape.and` |
+|-----------|-------------|
+| `signals.spec.warehouse_product` | identifiable, discoverable, provenanced, accessible |
+| `signals.spec.session` | identifiable, prepared_session_materials, transcript, can_have_attachment, provenanced, accessible |
+
+Existing warehouse rows claim `warehouse_product`. Agenda sessions
+**illustrate** `session`; they are not automatically inserted as
+warehouse products.
+
+### Worked shape: `can_have_attachment`
+
+Upper bound is SHACL, not an ad-hoc bool rule.
+
+```
+NodeShape id=signals.aspect.can_have_attachment
+  property path=dp:attachmentsAllowed  datatype=xsd:boolean min_count=1 max_count=1
+  or = [ …allowed, …forbidden ]
+
+NodeShape id=signals.aspect.can_have_attachment.allowed
+  property path=dp:attachmentsAllowed  has_value=true
+  property path=dp:attachments         min_count=0  node=signals.aspect.attachment
+
+NodeShape id=signals.aspect.can_have_attachment.forbidden
+  property path=dp:attachmentsAllowed  has_value=false
+  property path=dp:attachments         max_count=0
+```
+
+`attachments_allowed=true` and an empty list **conforms**.
+`attachments_allowed=false` and a nonempty list is
+`sh:MaxCountConstraintComponent` (`sh:Violation`).
+
+Attachment **pointers** may ride `PutAgendaItem` / `AGENDA`
+(`AgendaHintItem.attachments`). Bytes stay on rustfs
+(`s3://<origin_project>/resources/<note_id>/`) and are fetched at
+Connect with `RESOURCES`. Fields `session_prompt` (16) and
+`session_materials` (17) are deprecated — do not set on new writes.
+
+### Discovery
+
+`ServerQuery(kind=ASPECTS)` returns the shapes graph (`aspect_catalog`,
+`product_specs`). `kind=PRODUCTS` returns instances with `spec_id` and
+`AspectBinding[]`. Empty is honest. The warehouse remains SoR.

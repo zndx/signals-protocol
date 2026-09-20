@@ -72,9 +72,11 @@ service Engine {
   // (Gaius). Other engines answer UNIMPLEMENTED. The caller is a lattice
   // engine + named agent/profile (Hermes Ripley, Hermes Grok, Metabase Metabot).
   // Gaius writes the calendar zettel only. origin_project is the CALLER
-  // engine (hermes when Ripley/Grok create). Session materials are NOT in
-  // this RPC — they live in origin object storage and are fetched at
-  // Connect via ServerQuery RESOURCES. (added 2026-09-19 — additive v1.)
+  // engine (hermes when Ripley/Grok create). Session material BYTES are
+  // NOT in this RPC — rustfs + RESOURCES. Attachment POINTERS may ride
+  // item.attachments when attachments_allowed (SHACL upper bound).
+  // session_prompt / session_materials (fields 16/17) are deprecated.
+  // (added 2026-09-19; attachments 2026-09-20 — additive v1.)
   rpc PutAgendaItem(PutAgendaItemRequest) returns (PutAgendaItemResponse);
 }
 
@@ -293,6 +295,8 @@ enum ServerQueryKind {
   // 17 is AGENTS on the FMP-bearing tree (FMP=16, AGENTS=17). Skip so RESOURCES
   // is 18 on both trees.
   SERVER_QUERY_KIND_RESOURCES = 18;      // origin-project session materials (rustfs /<project>/resources/<note_id>/). note_id = agenda item id. Connect-time only. (added 2026-09-19)
+  // 19 skipped: AGENTS is 19 on the FMP-bearing tree.
+  SERVER_QUERY_KIND_ASPECTS = 20;        // shapes graph: AspectSpec[] + ProductSpec[] (SHACL Core). Discovery only. (added 2026-09-20)
 }
 
 message GitRemote {
@@ -421,6 +425,8 @@ message ServerQueryResponse {
   SearchHint search_hint = 17;        // kind=SEARCH (added 2026-09-08 — additive v1.)
   repeated AgentHint agents = 18;     // kind=AGENTS (added 2026-09-09 — additive v1.)
   ResourcesHint resources_hint = 20;  // kind=RESOURCES (added 2026-09-19 — additive v1; 19 skipped: AGENTS is 19 on the FMP-bearing tree)
+  repeated AspectSpec aspect_catalog = 21;  // kind=ASPECTS — shapes graph (added 2026-09-20)
+  repeated ProductSpec product_specs = 22;  // kind=ASPECTS — product specifications (added 2026-09-20)
 }
 
 // ── Agents (added 2026-09-09 — additive v1) ───────────────────────────────
@@ -502,6 +508,11 @@ message AgendaHintItem {
   // Named agent/profile that asked Gaius to create this item (`ripley`,
   // `grok`, `metabot`, `hermes`, …). Empty = unattributed. (added 2026-09-19.)
   string origin_agent = 18;
+  // Session-prompt / materials TEXT (16, 17) is deprecated. Do not set on
+  // new writes. Pointers live here; bytes live on rustfs and are fetched
+  // via RESOURCES. (added 2026-09-20 — additive v1.)
+  repeated Attachment attachments = 19;
+  bool attachments_allowed = 20;  // capability, upper bound (SHACL can_have_attachment)
 }
 
 message AgendaHint {
@@ -538,6 +549,17 @@ message ResourceObject {
   string name = 1;                 // prompt.md | materials.md | …
   string text = 2;                 // utf-8 body when the object is text
   string uri = 3;                  // s3://hermes/resources/<id>/prompt.md
+}
+
+// Thin-wire pointer on an Agenda item. Bytes stay in object storage.
+// role: prompt | materials | other. Empty list + attachments_allowed=true
+// is valid (holding). attachments_allowed=false + nonempty is a
+// MaxCountConstraintComponent violation. (added 2026-09-20 — additive v1.)
+message Attachment {
+  string name = 1;
+  string uri = 2;                  // s3://<origin_project>/resources/<note_id>/<name>
+  string role = 3;                 // prompt | materials | other
+  string media_type = 4;           // e.g. text/markdown; charset=utf-8
 }
 
 message ResourcesHint {
@@ -710,6 +732,111 @@ message ContributionsHint {
   repeated ContributionItem items = 6;
 }
 
+// ── SHACL Core subset (added 2026-09-20 — additive v1) ─────────────────────
+//
+// An Aspect IS a NodeShape. A Product specification is a NodeShape that
+// composes required aspects (sh:and). A product instance is the focus node.
+// This is SHACL Core (W3C Rec §§2–4), not SHACL-SPARQL: no sh:sparql, no
+// entailment, v1 paths are predicate paths only. Names follow sh: parameters.
+// Namespace for warehouse attributes: https://signals.zndx.org/ns/dp#
+// (predicate = details.a local name, or a dp: IRI).
+// optional counts so max_count = 0 is distinct from unset (attachment
+// upper bound). See specification/protocol/data_products.md.
+
+enum ShaclNodeKind {
+  SHACL_NODE_KIND_UNSPECIFIED = 0;
+  SHACL_NODE_KIND_IRI = 1;
+  SHACL_NODE_KIND_BLANK_NODE = 2;
+  SHACL_NODE_KIND_LITERAL = 3;
+  SHACL_NODE_KIND_BLANK_NODE_OR_IRI = 4;
+  SHACL_NODE_KIND_BLANK_NODE_OR_LITERAL = 5;
+  SHACL_NODE_KIND_IRI_OR_LITERAL = 6;
+}
+
+enum ShaclSeverity {
+  SHACL_SEVERITY_UNSPECIFIED = 0;  // default sh:Violation
+  SHACL_SEVERITY_INFO = 1;
+  SHACL_SEVERITY_WARNING = 2;
+  SHACL_SEVERITY_VIOLATION = 3;
+}
+
+message PropertyPath {
+  string predicate = 1;  // IRI; v1 predicate path only
+}
+
+message PropertyShape {
+  string id = 1;
+  PropertyPath path = 2;                 // REQUIRED sh:path
+  string name = 3;
+  string description = 4;
+  optional int32 min_count = 5;          // sh:minCount
+  optional int32 max_count = 6;          // sh:maxCount; 0 = empty list required
+  string datatype = 7;                   // sh:datatype (xsd:*)
+  string class = 8;                      // sh:class
+  ShaclNodeKind node_kind = 9;
+  string pattern = 10;
+  string flags = 11;
+  repeated string in = 12;               // sh:in
+  string has_value = 13;
+  optional int32 min_length = 14;
+  optional int32 max_length = 15;
+  string node = 16;                      // nested NodeShape id (sh:node)
+  ShaclSeverity severity = 17;
+  string message = 18;
+  bool deactivated = 19;
+}
+
+message NodeShape {
+  string id = 1;                         // IRI — aspect_id or spec_id
+  repeated string target_class = 2;
+  repeated string target_node = 3;
+  bool closed = 4;
+  repeated string ignored_properties = 5;
+  repeated PropertyShape property = 6;
+  repeated string and = 7;               // NodeShape ids
+  repeated string or = 8;
+  string not = 9;
+  repeated string xone = 10;
+  ShaclSeverity severity = 11;
+  string message = 12;
+  bool deactivated = 13;
+}
+
+message AspectSpec {
+  NodeShape shape = 1;                   // shape.id == signals.aspect.*
+  string title = 2;                      // rdfs:label
+  string intent = 3;                     // human; not a SHACL parameter
+}
+
+message ProductSpec {
+  NodeShape shape = 1;                   // shape.id == signals.spec.*; shape.and = required aspect ids
+  string title = 2;
+}
+
+message ValidationResult {
+  ShaclSeverity severity = 1;
+  string focus_node = 2;                 // product_id
+  string result_path = 3;
+  string value = 4;
+  string source_constraint_component = 5;
+  string source_shape = 6;
+  string result_message = 7;
+}
+
+message ValidationReport {
+  bool conforms = 1;
+  repeated ValidationResult result = 2;
+}
+
+message AspectBinding {
+  string aspect_id = 1;
+  bool conforms = 2;
+  string claim_status = 3;               // declared | holding | failed
+  ValidationReport report = 4;
+  string evidence_uri = 5;
+  string seal = 6;                       // "" | in_force | sealed
+}
+
 // One federated data product a peer publishes — DISCOVERY only. The Signals
 // warehouse (details / tx / hx_reasoning, see specification/protocol/
 // data_products.md) stays the inventory of record; this lets any engine find a
@@ -728,6 +855,8 @@ message ProductHint {
   string step = 9;              // producing step, e.g. select_article ("" = whole flow)
   string agent_focus = 10;      // what a reviewing agent should assess
   string history = 11;          // how history is retained, e.g. "iceberg-snapshots+run-qualified-details"
+  string spec_id = 12;          // signals.spec.* this instance claims (added 2026-09-20)
+  repeated AspectBinding aspects = 13;  // SHACL bindings vs the shapes graph (added 2026-09-20)
 }
 
 // ── Workload requirements: typed model (vLLM · KServe · YuniKorn targets) ──

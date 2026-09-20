@@ -106,7 +106,9 @@ epidemic gossip. Not CZMQ zgossip. Older engines: `UNIMPLEMENTED`.
 | `SURFACES` | this engine's advertised `Surface` list |
 | `QUEUES` | `QueueHint[]` — **declared leaf shape** (path, max, default guarantee). Time-varying occupancy floors are `zndx.scheduler.v1.Scheduler/RequestQueueShare`, not this snapshot. Peers never call scheduler-backend REST. |
 | `WORKLOADS` | `WorkloadHint[]` — WRK `model`, `capabilities`, `tensor_parallel` / `pipeline_parallel`, `gpu_tokens`. Never encode those in the queue name; pick heavy/medium/light (or extract/compute) from `gpu_tokens`. |
-| `AGENDA` | `AgendaHint` — calendar row only (title, times, public lede, `origin_project`, `origin_agent`). `note_id` = one item. Session materials are **not** here. |
+| `PRODUCTS` | `ProductHint[]` — product **instances** this peer publishes (`spec_id` + `AspectBinding[]`). Warehouse remains SoR. Empty is honest. |
+| `ASPECTS` | `AspectSpec[]` + `ProductSpec[]` — the **shapes graph** (SHACL Core NodeShapes). Aspects are not products. Empty is honest. (added 2026-09-20) |
+| `AGENDA` | `AgendaHint` — calendar row only (title, times, public lede, `origin_project`, `origin_agent`, `attachments` pointers, `attachments_allowed`). `note_id` = one item. Session material **bytes** are **not** here. |
 | `RESOURCES` | `ResourcesHint` — Connect-time only. `note_id` = agenda item id. Ask the **origin** engine (`origin_project=hermes` when Ripley created it). Objects live at rustfs `s3://<project>/resources/<note_id>/`. Empty is honest. |
 
 Do not invent remotes, peers, or UI URLs. Empty is honest.
@@ -118,10 +120,15 @@ Hermes answers `UNIMPLEMENTED` for this RPC and calls Gaius. The caller names
 itself (`origin_project=hermes`) and the named profile (`origin_agent=ripley`
 | `grok`). Gaius stores those origin fields and assigns the scratch path when
 `item.id` is empty. Required agenda fields (title; session needs starts) plus
-any optional public lede/tags go in the zettel. Session prompt and supporting
-materials do **not** go in this RPC — the origin engine writes them to rustfs
+any optional public lede/tags go in the zettel. Session material **bytes** do
+**not** go in this RPC — the origin engine writes them to rustfs
 `s3://<origin_project>/resources/<item.id>/` and Connect fetches them with
-`ServerQuery RESOURCES` against that origin.
+`ServerQuery RESOURCES` against that origin. Attachment **pointers**
+(`item.attachments`, `item.attachments_allowed`) MAY ride this RPC.
+`attachments_allowed=false` with a nonempty list is a SHACL
+`MaxCountConstraintComponent` violation — the holder refuses.
+`session_prompt` / `session_materials` (fields 16/17) are deprecated: do
+not set them on new writes.
 
 ## Status
 
