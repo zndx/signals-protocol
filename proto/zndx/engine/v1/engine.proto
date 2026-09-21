@@ -292,10 +292,9 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_AGENDA = 14;         // the AGENDA brief (today · tomorrow · the week) + item index; note_id = one item (added 2026-09-07)
   SERVER_QUERY_KIND_SEARCH = 15;         // KB and/or web hits; query= the string, stream= kb|web|all (added 2026-09-08)
   SERVER_QUERY_KIND_AGENTS = 16;         // agents this engine HOSTS (AgentHint[]); full offers: zndx.agent.v1.Agents/ListAgents (added 2026-09-09)
-  // 17 is AGENTS on the FMP-bearing tree (FMP=16, AGENTS=17). Skip so RESOURCES
-  // is 18 on both trees.
+  SERVER_QUERY_KIND_FMP = 17;            // live Financial Modeling Prep; key stays on Gaius. query=symbol/string, stream=search|quote|news|… (added 2026-09-21)
   SERVER_QUERY_KIND_RESOURCES = 18;      // origin-project session materials (rustfs /<project>/resources/<note_id>/). note_id = agenda item id. Connect-time only. (added 2026-09-19)
-  // 19 skipped: AGENTS is 19 on the FMP-bearing tree.
+  // 19 is fmp_hint on ServerQueryResponse.
   SERVER_QUERY_KIND_ASPECTS = 20;        // shapes graph: AspectSpec[] + ProductSpec[] (SHACL Core). Discovery only. (added 2026-09-20)
 }
 
@@ -424,7 +423,8 @@ message ServerQueryResponse {
   AgendaHint agenda_hint = 16;        // kind=AGENDA (added 2026-09-07 — additive v1.)
   SearchHint search_hint = 17;        // kind=SEARCH (added 2026-09-08 — additive v1.)
   repeated AgentHint agents = 18;     // kind=AGENTS (added 2026-09-09 — additive v1.)
-  ResourcesHint resources_hint = 20;  // kind=RESOURCES (added 2026-09-19 — additive v1; 19 skipped: AGENTS is 19 on the FMP-bearing tree)
+  FmpHint fmp_hint = 19;              // kind=FMP (added 2026-09-21 — additive v1; uses the reserved 19 hole)
+  ResourcesHint resources_hint = 20;  // kind=RESOURCES (added 2026-09-19 — additive v1)
   repeated AspectSpec aspect_catalog = 21;  // kind=ASPECTS — shapes graph (added 2026-09-20)
   repeated ProductSpec product_specs = 22;  // kind=ASPECTS — product specifications (added 2026-09-20)
 }
@@ -464,6 +464,31 @@ message SearchHint {
   string stream = 3;       // kb | web | all as served
   repeated SearchHit hits = 4;
   string note = 5;         // honest state when empty
+}
+
+// ── FMP (added 2026-09-21 — additive v1) ───────────────────────────────────
+//
+// Live Financial Modeling Prep. The API key stays on Gaius. Hermes / AgentRTC
+// hop here over ServerQuery. Empty hits plus `note` is honest (no key, rate
+// limit, no matches). stream = search|quote|news|filings|statement|metrics|
+// calendar|employees|eight_k|insider|profile|eod.
+message FmpHit {
+  string symbol = 1;
+  string title = 2;
+  string snippet = 3;
+  string url = 4;
+  string exchange = 5;
+  string as_of = 6;
+  string source = 7;
+}
+
+message FmpHint {
+  string project = 1;
+  string query = 2;
+  string stream = 3;
+  repeated FmpHit hits = 4;
+  string note = 5;
+  string spoken = 6;
 }
 
 // ── Agenda (added 2026-09-07 — additive v1) ───────────────────────────────
