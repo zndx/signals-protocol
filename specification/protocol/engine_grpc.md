@@ -155,6 +155,15 @@ advertise the extension. Full table: Hermes working copy
 gains that file. `Complete.tools_json` / `messages_json` / `ToolCall`
 MUST lower to those tensors when the peer advertises the extension.
 
+## OIP stream hop
+
+`ModelStreamInfer` is the bi-directional model hop: the same messages, one
+tensor per frame, and a reverse request for cancel or a new prompt. An engine
+that does not host the capability forwards that RPC to a peer it found by
+`Status` and `ModelReady`. It does not advertise the capability, and it does
+not dial vLLM. Frame tensors and the routing rules are
+[`oip_stream.md`](oip_stream.md).
+
 ## Announce
 
 Additive v1. A joining engine **pushes** a `PeerHint` to a directory engine
@@ -235,7 +244,7 @@ foreign engine's resident capability is respected — capability requests are FO
 over this protocol in preference to moving GPUs (model loads are expensive; requests
 are cheap).
 
-## OIP mapping (horizon)
+## OIP mapping
 
 | zndx.engine.v1 | Open Inference Protocol |
 |---|---|

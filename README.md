@@ -23,6 +23,7 @@ service is the federation face. One stub, any engine.
 
 | package | spec | status |
 |---|---|---|
+| `inference` (OIP) | [`specification/protocol/oip_stream.md`](specification/protocol/oip_stream.md) | KServe messages plus **`ModelStreamInfer`**: the bi-directional model hop. A forwarder relays it; only the hosting engine dials vLLM |
 | `zndx.engine.v1` | [`specification/protocol/engine_grpc.md`](specification/protocol/engine_grpc.md) | v1 — `Complete` + `Status` + `Remediate` + **`Yield`** + `ServerQuery` + `RecordLineage` + `WatchWorkload` + **`Announce`** (TTL’d S2S join); **operating profiles** (`instruct` = same model, effort low — [`capabilities.md`](specification/protocol/capabilities.md)); warehouse `tx_id` is RFC 9562 UUIDv7 ([`tx_id.md`](specification/protocol/tx_id.md)); data products on shared RustFS ([`data_products.md`](specification/protocol/data_products.md)) with **SHACL Core Aspects** (`NodeShape` / `ProductSpec` / `AspectBinding`) and Agenda **attachments**; primary UI discovery in [`surfaces.md`](specification/protocol/surfaces.md) |
 | `zndx.scheduler.v1` | [`specification/protocol/scheduler_grpc.md`](specification/protocol/scheduler_grpc.md) | v1 — federated **scheduler** capability (queues, policy, projection, **queue-share requests**). Lab backend: YuniKorn; not a vendor in the service name |
 | `zndx.supervision.v1` | [`specification/operations/nautilus_supervision.md`](specification/operations/nautilus_supervision.md) | v1 — the **supervision grammar**: supervision tree, state machines with phase gates and horizons, objectives on the final surfaced result, the position vocabulary engines report and the ledger stamps, and the **Nautilus** supervisor service. Grammar here; a project ships an *instance* (no project is named in the protocol) |
@@ -72,12 +73,16 @@ Cross-project **admission** is YuniKorn (sentinel **is** the Application).
 
 ## Relationship to the Open Inference Protocol
 
-This repository borrows OIP's *form* (versioned spec + proto, additive evolution) and
-reserves OIP itself as the **horizon peer protocol**: when heterogeneous serving stacks
-(KServe, Triton, external clusters) join the federation, `ModelInfer`/`ServerReady` are
-the lingua franca, and `zndx.engine.v1.Complete` maps onto them (chat-style completion
-with reasoning retention is a convenience surface OIP does not define; the mapping note
-lives in the spec doc). Until then, the zndx engines federate on this lighter contract.
+OIP is the model hop. `proto/inference/open_inference_grpc.proto` is the KServe
+message set plus `ModelStreamInfer`, a bi-directional stream of those same
+messages. The engine that hosts a capability dials vLLM in private and emits
+OIP frames. An engine that does not host it forwards that RPC to a peer chosen
+by `Engine/Status` and `ModelReady` — pairwise, no gossip — and does not
+advertise the forwarded capability. Frame tensors, cancel, and progress are
+[`specification/protocol/oip_stream.md`](specification/protocol/oip_stream.md).
+
+`zndx.engine.v1.Complete` remains the unary capability convenience over the
+same tensors. It is not a second streaming protocol.
 
 ## Codegen
 
