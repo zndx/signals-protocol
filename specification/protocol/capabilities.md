@@ -14,9 +14,19 @@ companion.
 ## Model capabilities
 
 What `WorkloadOffer.capabilities` advertises today (per peer; empty list is
-honest): `thinking`, `instruct`, `complete`, `open-embedding`, `extract`. Future entries
+honest): `thinking`, `instruct`, `complete`, `decisions`, `open-embedding`, `extract`. Future entries
 (`sae`, `clt`, `vision`) are intentionally undeclared until a peer serves
 them — requesting one yields NOMIX, which is the honest answer.
+
+`decisions` is not an operating profile of the thinking model and it is
+not a Complete capability. The capability token stays `decisions` (that
+is the name a Metaflow workload requests). On Gaius it means the
+deployment **thinking + dual-d3-flash**: Qwen3.8-27B stays on vLLM on the
+heavy queue, and two `vllm-sr/d3-flash` replicas fill the light queue.
+The fulfilment is `Engine/Decide` (d3_server `POST /v1/systemone`), which
+returns a score for every allowed answer. Conjoining a method capability
+with `decisions` is `#EP.00000020.NOMIX`. Calling `Complete` with
+`decisions` is `#EP.00000022.NOTTEXT`. See §Structured decisions.
 
 A method-only conjunction (e.g. `["cot_reasoning"]`) defaults the model
 capability to `thinking`.
@@ -68,6 +78,36 @@ result with a trajectory. Agents are not `Complete` capabilities: they have thei
 `zndx.agent.v1.Agents`, and are discovered by `ServerQuery kind=AGENTS` / `ListAgents`. See
 [agent_grpc.md](agent_grpc.md). An agent's `model_capability` is one of the model capabilities
 above, aligned to its operating profile by the serving engine.
+
+## Structured decisions (additive, 2026-10-11)
+
+A `decisions` request is a set of typed questions about one state. The
+serving engine posts `{model, state, questions}` to d3_server
+`POST /v1/systemone` on one `vllm-sr/d3-flash` replica and returns the
+answers. The caller names the capability, not the model. Thinking stays
+on the heavy queue for text; it is not the decision read. The decision
+head is `readout.safetensors` under noncausal attention, not a next-token
+logprob.
+
+| type | criteria | answer |
+|---|---|---|
+| `choice` | object of option name to a description or `null` (1–255) | the runtime's answer object for that question |
+| `noul` | `null`, or `true` / `false` descriptions | the runtime's answer object for that question |
+| `score` | ordered list of 2–10 distinct level names | the runtime's answer object for that question |
+
+Limits: 64 questions per request (client sanity bound). A question id is
+a non-empty string. Instructions may be omitted; when set on a string
+state the engine folds them into the state, because d3_server rejects a
+top-level `instructions` field. A non-empty `cache_salt` is
+`#EP.00000024.BADDECISION` (this runtime has no prefix-cache salt). HTTP
+422 is the same code. Transport errors and HTTP 503 are
+`#EP.00000023.NODECISION` and may try the other replica. An endpoint
+that is not healthy is `#EP.00000016.NOTREADY` — the engine does not
+start d3 inside `Decide` and does not fall back to thinking. One replica
+answering while the other is down is the other copy of the same model.
+
+`/v1/decisions` is the OpenAI-shaped name some gateways publish for a
+different body. This federation's route is d3_server `/v1/systemone`.
 
 ## Method capabilities
 
