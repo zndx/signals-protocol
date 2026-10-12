@@ -41,6 +41,28 @@ Errors surface as gRPC status codes; the engine stays up (INTERNAL for serving
 failures, UNAVAILABLE while a capability is cold-loading if the engine chooses not to
 block).
 
+## Decide
+
+Structured decision read for the `decisions` model capability. Not Complete.
+The engine posts `{model, state, questions}` to d3_server `POST /v1/systemone`
+on one `vllm-sr/d3-flash` replica and returns the answers. The caller does
+not name a model. Vocabulary and limits:
+[capabilities.md](capabilities.md) §Structured decisions. (added 2026-10-11)
+
+| field | semantics |
+|---|---|
+| `capability` | must be `decisions`. Anything else is `#EP.00000022.NOTTEXT` |
+| `state_json` | JSON text of the state. A string state is a JSON string |
+| `questions` | ordered `DecisionQuestion{id, type, instructions, criteria_json}` |
+| `instructions` | folded into a string state. A non-string state with instructions set is `#EP.00000024.BADDECISION`. Not sent as its own HTTP field |
+| `cache_salt` | non-empty is `#EP.00000024.BADDECISION`. d3_server has no prefix-cache salt |
+
+`Complete` with capability `decisions` is `#EP.00000022.NOTTEXT`. A method
+capability conjoined with `decisions` is `#EP.00000020.NOMIX`. The endpoint
+not being healthy is `#EP.00000016.NOTREADY`: `Decide` does not load the
+model and does not fall back to thinking. Requesting `decisions` keeps
+thinking on the heavy queue and admits two light `d3-flash` replicas.
+
 ## Yield
 
 C2 → engine only. The Signals-owned C2 server (gRPC client) calls `Yield` on

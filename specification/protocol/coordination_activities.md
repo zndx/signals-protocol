@@ -57,7 +57,7 @@ local process ──(local engine RPC)──▶ project ENGINE ──(zndx.sched
 | `horizon_ns` | the run's own timeout; renew before it or the intent expires |
 | `claims[]` | YK leaves the activity occupies (informational — YuniKorn still admits) |
 | `precludes[]` | YK leaf FQNs peers must NOT admit new work into while RUNNING |
-| `postures{}` | `"<project>.endpoint.<alias>" → "hold-uptime"`: that project cedes the endpoint's intent until the activity ends — no restart chase, no unit recycle; other keys are additive vocabulary |
+| `postures{}` | `"<project>.endpoint.<alias>" → "hold-uptime"`: that project cedes the endpoint's intent until the activity ends — no restart chase, no unit recycle. `federation.gpu → yield`: every federated project other than `activity.peer` hands over every GPU it holds (end the host process, drop the YK claim and the advisory lease) until the activity leaves `RUNNING`. Other keys stay additive vocabulary |
 | `reason` / `note` | why it exists / Signals-written outcome |
 
 Intent is **in force** only while `RUNNING`. `QUEUED` is declared-not-yet-
@@ -98,6 +98,20 @@ Airflow unreachable is an error, never a local substitute (fail-fast).
   activity, horizon): the orchestrator does not restart it, the workload
   profile carries no unmet intent for it, status reads `CEDED`. When the
   activity ends the desired set is restored.
+- **Hand over GPUs.** A RUNNING activity with `federation.gpu=yield` is
+  Signals telling every project except the declarer to release the GPUs it
+  holds. The declarer does not yield its own claims. Peers stop their own
+  host processes; nobody dials another project's `Engine/Yield`. For kind
+  `decisions` Signals itself writes that posture and the queue
+  configuration that fills the box: heavy 4 (thinking stays) and light 2
+  (two `d3-flash` replicas). Other GPU leaves (`agent-rtc`, medium,
+  extract) are precluded. Light and heavy are not precluded — the
+  declarer has to admit the replicas. When the activity ends, a peer
+  restores a process only if that peer still wants it (Hermes brings
+  moshi back only when the interactive session is still in force). Peers
+  that have not released by the declarer's wait are
+  `#CO.00000010.NOHANDOVER`: the workload does not start on top of a
+  foreign lease.
 - **Admit around it.** Admission of a local class whose YK leaf is in a
   RUNNING activity's `precludes[]` is deferred (a deferral, not a failure).
   Leaves not precluded keep admitting — light and medium sentinels continue

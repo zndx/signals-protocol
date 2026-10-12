@@ -525,7 +525,7 @@ message DeclareActivityRequest {
   int64 horizon_ns = 5;             // unix ns; the intent expires here unless renewed/released
   repeated zndx.engine.v1.ActivityClaim claims = 6;
   repeated string precludes = 7;    // YK leaf FQNs peers must not admit into while RUNNING
-  map<string, string> postures = 8; // "<project>.endpoint.<alias>" → "hold-uptime", …
+  map<string, string> postures = 8; // "<project>.endpoint.<alias>" → "hold-uptime"; "federation.gpu" → "yield"
   string reason = 9;
 }
 

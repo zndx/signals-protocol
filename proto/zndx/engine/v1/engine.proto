@@ -25,6 +25,15 @@ service Engine {
   // Request an inference CAPABILITY. The engine selects/ensures the model and serves internally;
   // the caller never sees a model endpoint.
   rpc Complete(CompleteRequest) returns (CompleteResponse);
+  // Structured decision read. Capability must be "decisions". The serving
+  // engine posts {model, state, questions} to d3_server POST /v1/systemone
+  // on one vllm-sr/d3-flash replica (dual-d3-flash: two light replicas
+  // beside thinking, which stays on the heavy queue) and returns the
+  // answers. This is not Complete: a text method cannot conjoin with it,
+  // and calling Complete with capability "decisions" is FAILED_PRECONDITION
+  // #EP.00000022.NOTTEXT. The caller does not name a model.
+  // (added 2026-10-11, gaius — additive v1.)
+  rpc Decide(DecideRequest) returns (DecideResponse);
   // The federation-facing status surface: what capabilities this engine serves, on which GPUs.
   rpc Status(StatusRequest) returns (StatusResponse);
   // Adapt to a boundary SIGNAL (Holland CAS / Signals & Boundaries). A membrane or reasoner DETECTED an
@@ -224,6 +233,46 @@ message CompleteResponse {
   // reasoning layer was produced. Unset on the legacy path.
   // (added 2026-09-08 — additive v1.)
   OperatingProfile profile = 11;
+}
+
+// One typed question about DecideRequest.state_json. criteria_json is the
+// type's criteria: a JSON object (choice, or noul true/false descriptions),
+// a JSON array of level names (score), or empty/null (noul with no gloss).
+// A question carries no other fields. (added 2026-10-11, gaius.)
+message DecisionQuestion {
+  string id = 1;
+  string type = 2;            // choice | noul | score
+  string instructions = 3;
+  string criteria_json = 4;
+}
+
+message DecideRequest {
+  // Must be "decisions". Any other value is FAILED_PRECONDITION
+  // #EP.00000022.NOTTEXT.
+  string capability = 1;
+  // JSON text of the state. A string state is a JSON string. An object or
+  // array is sent to the model as its JSON text. Empty or invalid JSON is
+  // INVALID_ARGUMENT #EP.00000024.BADDECISION.
+  string state_json = 2;
+  repeated DecisionQuestion questions = 3;
+  // Optional context. d3_server rejects a top-level instructions field,
+  // so the engine folds this into a string state. A non-string state with
+  // instructions set is INVALID_ARGUMENT #EP.00000024.BADDECISION.
+  string instructions = 4;
+  // Not sent. d3_server has no prefix-cache salt; a non-empty value is
+  // INVALID_ARGUMENT #EP.00000024.BADDECISION.
+  string cache_salt = 5;
+}
+
+message DecideResponse {
+  string id = 1;
+  string model = 2;                 // the model the engine actually served
+  string answers_json = 3;          // the answers object, JSON
+  string diagnostics_json = 4;      // per-question label_mass / argmax_is_label
+  int32 input_tokens = 5;
+  int32 output_tokens = 6;
+  float latency_ms = 7;
+  string fulfilled_by = 8;          // e.g. direct@d3-flash-0/vllm-sr/d3-flash@d3:http://127.0.0.1:8096
 }
 
 message StatusRequest {}
@@ -666,7 +715,11 @@ message ThoughtsHint {
 //   precludes  — YK leaf FQNs peers must NOT admit new work into while RUNNING
 //   postures   — "<project>.endpoint.<alias>" → "hold-uptime": that project
 //                cedes the endpoint's intent (no restart chase, no unit recycle)
-//                until the activity ends; other keys are additive vocabulary
+//                until the activity ends. "federation.gpu" → "yield": every
+//                project other than activity.peer hands over every GPU it
+//                holds until the activity leaves RUNNING. Kind "decisions"
+//                is that handover for the whole box (heavy 4 + light 2).
+//                Other keys are additive vocabulary.
 //   horizon    — the run's own timeout; the owner renews (a new run, same
 //                activity_id) or releases; expiry is a release by absence
 enum ActivityState {
