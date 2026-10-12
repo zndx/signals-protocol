@@ -715,7 +715,11 @@ message ThoughtsHint {
 //   precludes  — YK leaf FQNs peers must NOT admit new work into while RUNNING
 //   postures   — "<project>.endpoint.<alias>" → "hold-uptime": that project
 //                cedes the endpoint's intent (no restart chase, no unit recycle)
-//                until the activity ends; other keys are additive vocabulary
+//                until the activity ends. "federation.gpu" → "yield": every
+//                project other than activity.peer hands over every GPU it
+//                holds until the activity leaves RUNNING. Kind "decisions"
+//                is that handover for the whole box (heavy 4 + light 2).
+//                Other keys are additive vocabulary.
 //   horizon    — the run's own timeout; the owner renews (a new run, same
 //                activity_id) or releases; expiry is a release by absence
 enum ActivityState {
