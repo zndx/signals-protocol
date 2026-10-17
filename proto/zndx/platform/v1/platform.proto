@@ -1,0 +1,219 @@
+// zndx.platform.v1 — external platforms as a federation capability (2026-10-17, v1 draft).
+//
+// FOURTH capability class, beside model, method, and agent:
+//   MODEL    — zndx.engine.v1 operating profiles
+//   METHOD   — Complete.capabilities[]
+//   AGENT    — zndx.agent.v1, an assemblage THIS lattice hosts
+//   PLATFORM — this package. A vendor system whose own nouns stay foreign.
+//              The engine that holds the credential is the holder. Peers call
+//              the holder. The vendor runs the object.
+//
+// Mistral's "agent" is a saved preset (ag_…), not an AgentOffer. A Conversation
+// (conv_…), a Handoff, a Workflow execution, a Library, and Document AI are
+// further nouns. None is advertised on ServerQuery kind=AGENTS.
+//
+// Spec: specification/protocol/platform_grpc.md.
+// Reserved on zndx.engine.v1, NOT allocated in this commit:
+//   ServerQueryKind PLATFORMS = 21
+//   ServerQueryResponse.platforms = 23
+// Additive-only within v1.
+syntax = "proto3";
+
+package zndx.platform.v1;
+
+// Registered BESIDE Engine on the lattice port of an engine that holds at least
+// one platform credential. Reflection MUST list it. No credential → do not register.
+service Platforms {
+  // Platforms this engine holds. Empty is honest.
+  rpc ListPlatforms(ListPlatformsRequest) returns (ListPlatformsResponse);
+  // One platform: which products and verbs are live, and the foreign objects
+  // the holder will name (agents, workflows, libraries, connectors).
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  // One verb. Stream ends with exactly one done. needs_input is followed by
+  // done.state = NEEDS_INPUT; the caller continues with verb "reply".
+  rpc Call(PlatformCall) returns (stream PlatformEvent);
+  // Stop a call before its horizon. Idempotent on a finished call.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  // Record for a supervisor that does not hold the stream.
+  rpc GetCall(GetCallRequest) returns (CallRecord);
+}
+
+// Same three values as zndx.agent.v1.Billing. Repeated here so this package
+// does not take a dependency on the agent proto for one enum. A pay-per-call
+// vendor key is TOKEN_METERED. Callers MAY refuse it.
+enum Billing {
+  BILLING_UNSPECIFIED = 0;
+  BILLING_LOCAL = 1;
+  BILLING_SUBSCRIPTION = 2;
+  BILLING_TOKEN_METERED = 3;
+}
+
+enum CallState {
+  CALL_STATE_UNSPECIFIED = 0;
+  CALL_RUNNING = 1;
+  CALL_COMPLETED = 2;
+  CALL_FAILED = 3;
+  CALL_CANCELLED = 4;
+  CALL_NEEDS_INPUT = 5;
+  CALL_BUDGET_EXHAUSTED = 6;
+}
+
+message PlatformOffer {
+  string platform_id = 1;          // {holder}/{vendor}@{account}
+  string project = 2;              // holder engine project
+  string vendor = 3;               // mistral
+  string account = 4;              // non-secret label; not a key
+  Billing billing = 5;
+  repeated string products = 6;    // document, workflow, agent, conversation, library, connector
+  string note = 7;
+}
+
+message ListPlatformsRequest {}
+
+message ListPlatformsResponse {
+  string project = 1;
+  repeated PlatformOffer platforms = 2;
+}
+
+// Light discovery row for ServerQuery kind=PLATFORMS (field 23, reserved).
+message PlatformHint {
+  string platform_id = 1;
+  string project = 2;
+  string vendor = 3;
+  string account = 4;
+  string billing = 5;              // local | subscription | token-metered
+  repeated string products = 6;
+}
+
+message ForeignObject {
+  string product = 1;              // agent | workflow | library | connector
+  string foreign_id = 2;           // ag_…, workflow name, library id, connector id
+  string name = 3;
+  string description = 4;
+  repeated string tool_types = 5;  // web_search, code_interpreter, … — types only
+  repeated string handoff_ids = 6; // other foreign ids; agent.get
+}
+
+message DescribeRequest {
+  string platform_id = 1;          // or vendor, when the holder has one account
+  string vendor = 2;
+}
+
+message DescribeResponse {
+  PlatformOffer platform = 1;
+  // verb is "{product}.{verb}" the holder actually serves.
+  repeated string verbs = 2;
+  repeated ForeignObject objects = 3;
+}
+
+message RunBudget {
+  int32 max_seconds = 1;
+}
+
+message PlatformCall {
+  string platform_id = 1;
+  string vendor = 2;               // used when platform_id is empty and the holder has one account
+  string product = 3;              // document | workflow | agent | conversation | library | connector
+  string verb = 4;                 // analyze | execute | get | list | start | append | reply | describe
+  string foreign_id = 5;
+  string input_json = 6;           // object. ≤ 1 MiB. No credential. No model name.
+  string workspace_uri = 7;        // set → holder also writes a lattice data product
+  RunBudget budget = 8;
+  string call_id = 9;              // UUIDv7; caller-minted is idempotent
+  string tx_id = 10;               // UUIDv7
+  string reason = 11;
+}
+
+message PlatformEvent {
+  string call_id = 1;
+  int32 seq = 2;
+  int64 at_unix_ms = 3;
+  oneof event {
+    CallAccepted accepted = 4;
+    Progress progress = 5;
+    Entry entry = 6;
+    Handoff handoff = 7;
+    NeedsInput needs_input = 8;
+    Deliverable deliverable = 9;
+    CallDone done = 10;
+  }
+}
+
+message CallAccepted {
+  string call_id = 1;
+  string platform_id = 2;
+  string product = 3;
+  string verb = 4;
+  string foreign_id = 5;
+  string activity_id = 6;          // coordination Activity kind platform_call
+  string billing = 7;
+}
+
+message Progress {
+  string detail = 1;
+}
+
+// A projected vendor entry. vendor + foreign_id keep it from reading as a
+// lattice tool the caller lent.
+message Entry {
+  string vendor = 1;
+  string foreign_id = 2;
+  string role = 3;                 // assistant | tool | user
+  string name = 4;                 // tool name when role=tool
+  string text = 5;
+  string agent_foreign_id = 6;
+  string fulfilled_by = 7;         // mistral/web_search
+}
+
+message Handoff {
+  string vendor = 1;
+  string foreign_id = 2;           // handoff_…
+  string agent_foreign_id = 3;     // ag_… now speaking
+  string agent_name = 4;
+}
+
+message NeedsInput {
+  string foreign_id = 1;           // conversation id
+  string function_name = 2;
+  string arguments_json = 3;
+}
+
+message Deliverable {
+  string json = 1;                 // the verb's result object
+  string trajectory_uri = 2;       // lattice URI, or mistral:conv_… / mistral:exec_…
+  string trajectory_format = 3;    // json | foreign | atif
+}
+
+message CallDone {
+  CallState state = 1;
+  string stop_reason = 2;
+  string error = 3;                // no credential, no request headers
+  string foreign_id = 4;
+}
+
+message CancelRequest {
+  string call_id = 1;
+}
+
+message CancelResponse {
+  bool accepted = 1;
+  CallState state = 2;
+  string error = 3;
+}
+
+message GetCallRequest {
+  string call_id = 1;
+}
+
+message CallRecord {
+  string call_id = 1;
+  string platform_id = 2;
+  string product = 3;
+  string verb = 4;
+  CallState state = 5;
+  int64 started_unix_ms = 6;
+  int64 ended_unix_ms = 7;
+  string foreign_id = 8;
+  string error = 9;
+  string trajectory_uri = 10;
+}

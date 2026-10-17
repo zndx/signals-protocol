@@ -79,6 +79,14 @@ result with a trajectory. Agents are not `Complete` capabilities: they have thei
 [agent_grpc.md](agent_grpc.md). An agent's `model_capability` is one of the model capabilities
 above, aligned to its operating profile by the serving engine.
 
+## Platform capabilities (2026-10-17)
+
+The fourth class. A **platform** is an external vendor system an engine holds a
+credential for. The vendor's own objects (Mistral's Agent, Conversation, Workflow,
+Library, Document AI) are not model capabilities and not `zndx.agent.v1` agents.
+Callers name vendor + product + verb. Vendor model strings stay inside the holder
+and are not advertised on `Status.endpoints`. See [platform_grpc.md](platform_grpc.md).
+
 ## Structured decisions (additive, 2026-10-11)
 
 A `decisions` request is a set of typed questions about one state. The

@@ -30,7 +30,10 @@ engine aligns to. (`reasoner` is taken — HermiT — and stays taken.)
 
 Three capability classes now exist: **model** (`zndx.engine.v1`, operating profiles),
 **method** (optillm technique classes, `Complete.capabilities[]`), **agent** (this package).
-A run is a session with tools and a deliverable, never a one-shot `Complete`.
+A fourth class, **platform**, names an external vendor system whose own nouns stay
+foreign — a Mistral Agent (`ag_…`), Conversation, or Workflow is not an offer here.
+See [platform_grpc.md](platform_grpc.md). A run is a session with tools and a
+deliverable, never a one-shot `Complete`.
 
 ## Service
 
@@ -117,7 +120,10 @@ its `acp:*` registry are `AGENT_TRANSPORT_CLI` / `AGENT_TRANSPORT_ACP` offers.
 
 **Follow-up in Hermes:** its `Status` capability `agent` is today an inference route to a
 peer's `thinking` — the mind leaking out as if it were the agent. Under this vocabulary the
-agent is `hermes` (an `AgentOffer`), and the inference route is `thinking`.
+agent is `hermes` (an `AgentOffer`), and the inference route is `thinking`. The 2026-10-17
+offers `mistral-document` and `mistral-workflow` are facades over Mistral HTTP. They move
+to `zndx.platform.v1` and are not a pattern for further vendor names
+([platform_grpc.md](platform_grpc.md)).
 
 ## Adoption order
 
