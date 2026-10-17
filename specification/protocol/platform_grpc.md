@@ -5,10 +5,9 @@ the vocabulary and the rules.
 **Precedent:** [flight_data_plane.md](flight_data_plane.md) adopts an external wire and
 defines only the lattice rules around it. [keyframe.md](keyframe.md) already forbids a
 token-metered key on an off-lattice path that was declared subscription.
-**Proto:** `proto/zndx/platform/v1/platform.proto` (this draft). `ServerQuery` kind
-`PLATFORMS` = **21** and `ServerQueryResponse.platforms` = **23** are reserved for the
-implementation PR. They are not in `engine.proto` yet. Kind 19 is the `fmp_hint` hole;
-20 is `ASPECTS`.
+**Proto:** `proto/zndx/platform/v1/platform.proto`. `ServerQuery` kind
+`PLATFORMS` = **21** and `ServerQueryResponse.platforms` = **23** are allocated.
+Kind 19 is the `fmp_hint` hole; 20 is `ASPECTS`.
 
 Reviewed against the public Mistral docs on 2026-10-17. Vendor behavior below is that
 reading. A preview API on their side does not rename a lattice product.

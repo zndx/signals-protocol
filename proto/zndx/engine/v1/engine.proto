@@ -21,6 +21,8 @@
 syntax = "proto3";
 package zndx.engine.v1;
 
+import "zndx/platform/v1/platform.proto";
+
 service Engine {
   // Request an inference CAPABILITY. The engine selects/ensures the model and serves internally;
   // the caller never sees a model endpoint.
@@ -345,6 +347,7 @@ enum ServerQueryKind {
   SERVER_QUERY_KIND_RESOURCES = 18;      // origin-project session materials (rustfs /<project>/resources/<note_id>/). note_id = agenda item id. Connect-time only. (added 2026-09-19)
   // 19 is fmp_hint on ServerQueryResponse.
   SERVER_QUERY_KIND_ASPECTS = 20;        // shapes graph: AspectSpec[] + ProductSpec[] (SHACL Core). Discovery only. (added 2026-09-20)
+  SERVER_QUERY_KIND_PLATFORMS = 21;      // external platforms this engine holds. Full offers: zndx.platform.v1.Platforms/ListPlatforms (added 2026-10-17)
 }
 
 message GitRemote {
@@ -476,6 +479,7 @@ message ServerQueryResponse {
   ResourcesHint resources_hint = 20;  // kind=RESOURCES (added 2026-09-19 — additive v1)
   repeated AspectSpec aspect_catalog = 21;  // kind=ASPECTS — shapes graph (added 2026-09-20)
   repeated ProductSpec product_specs = 22;  // kind=ASPECTS — product specifications (added 2026-09-20)
+  repeated zndx.platform.v1.PlatformHint platforms = 23;  // kind=PLATFORMS (added 2026-10-17)
 }
 
 // ── Agents (added 2026-09-09 — additive v1) ───────────────────────────────
