@@ -63,6 +63,30 @@ not being healthy is `#EP.00000016.NOTREADY`: `Decide` does not load the
 model and does not fall back to thinking. Requesting `decisions` keeps
 thinking on the heavy queue and admits two light `d3-flash` replicas.
 
+## AdmitSession
+
+Bidirectional stream. The caller appends an AgentRTC transcript. This
+engine windows that text and streams back only the spans that qualify
+against its aperture. The segment text is not echoed. Offsets are into
+the concatenation of `SessionText.text` in `seq` order, so the caller
+slices the string it already holds.
+
+Aegir serves this. Every other engine returns `UNIMPLEMENTED`.
+(added 2026-10-18)
+
+| field | semantics |
+|---|---|
+| `session_id` | Hermes session id, `agent-rtc-<connect>` |
+| `seq` | Caller order. Retransmitting a seq replaces the text from that frame |
+| `text` | New characters only |
+| `end` | Last frame |
+
+`SegmentAdmission` carries `start`, `end`, `genus_iri`, `genus_code`,
+`genus_label`, `rel_margin_h`, and `tau`. `seq` is the text generation
+those offsets refer to. A window that misses the genus margin is not
+sent. A root-only match is not sent. An empty response stream is normal.
+The encoder, Qdrant, and the collection name do not cross this RPC.
+
 ## Yield
 
 C2 → engine only. The Signals-owned C2 server (gRPC client) calls `Yield` on

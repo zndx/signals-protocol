@@ -36,6 +36,12 @@ service Engine {
   // #EP.00000022.NOTTEXT. The caller does not name a model.
   // (added 2026-10-11, gaius — additive v1.)
   rpc Decide(DecideRequest) returns (DecideResponse);
+  // Stream an AgentRTC transcript. The caller appends new characters.
+  // This engine windows them and streams back only the qualified genus
+  // spans, as character offsets into the concatenation. The text is not
+  // echoed. Engines that do not hold the aperture return UNIMPLEMENTED.
+  // (added 2026-10-18, aegir — additive v1.)
+  rpc AdmitSession(stream SessionText) returns (stream SegmentAdmission);
   // The federation-facing status surface: what capabilities this engine serves, on which GPUs.
   rpc Status(StatusRequest) returns (StatusResponse);
   // Adapt to a boundary SIGNAL (Holland CAS / Signals & Boundaries). A membrane or reasoner DETECTED an
@@ -1130,4 +1136,31 @@ message AnnounceAck {
   bool accepted = 1;
   int32 ttl_seconds = 2;  // TTL the directory will actually keep
   string error = 3;       // guru when refused; empty on accept
+}
+
+// One append of an AgentRTC transcript. seq is the caller's order.
+// text is only the new characters. end marks the last frame.
+// Retransmitting a seq replaces the concatenation from that frame.
+// (added 2026-10-18, aegir — additive v1.)
+message SessionText {
+  string session_id = 1;
+  uint64 seq = 2;
+  string text = 3;
+  bool end = 4;
+}
+
+// One window the aperture kept. start and end are character offsets into
+// the concatenation of SessionText.text in seq order. The segment text is
+// not included. A window that does not qualify is not sent.
+// (added 2026-10-18, aegir — additive v1.)
+message SegmentAdmission {
+  string session_id = 1;
+  uint64 seq = 2;
+  uint32 start = 3;
+  uint32 end = 4;
+  string genus_iri = 5;
+  string genus_code = 6;
+  string genus_label = 7;
+  float rel_margin_h = 8;
+  float tau = 9;
 }
